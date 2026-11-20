@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "types": ["node", "vite/client"],
+    "preserveSymlinks": true,
+    "paths": { "@/*": ["./src/*"] }
+  },
+  "include": [
+    "src",
+    "server",
+    "server.ts",
+    "tests",
+    "scripts",
+    "vite.config.ts"
+  ]
+}

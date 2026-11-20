@@ -23,6 +23,7 @@ import threading
 import selectors
 import time
 import telemetry
+import job_history
 from receipt import format_receipt, render_receipt
 from mcp import types
 from typing import Literal, Any, Callable
@@ -179,7 +180,7 @@ def _validate_options(copies: int, duplex: str, color: str, page_range: str | No
                 raise ValueError("Reversed page range")
 
 
-def _submit(path: Path, copies: int, duplex: str, color: str, page_range: str | None, paper_size: str) -> dict[str, str]:
+def _submit_raw(path: Path, copies: int, duplex: str, color: str, page_range: str | None, paper_size: str) -> dict[str, str]:
     args = ["lp", "-h", CUPS, "-d", QUEUE, "-n", str(copies),
             "-t", "Draft", "-o", f"sides={duplex}", "-o", f"print-color-mode={color}",
             "-o", f"media={paper_size}"]
@@ -190,6 +191,35 @@ def _submit(path: Path, copies: int, duplex: str, color: str, page_range: str | 
     if not match:
         raise RuntimeError("Submission outcome unknown; inspect list_jobs before retrying.")
     return {"job_id": match[1]}
+
+
+def _submit_recorded(path: Path, copies: int, duplex: str, color: str,
+                     page_range: str | None, paper_size: str, *, pages: int,
+                     dry_run: bool = False) -> dict[str, Any]:
+    history_id = job_history.begin("document", pages, copies, dry_run)
+    try:
+        result = {} if dry_run else _submit_raw(path, copies, duplex, color, page_range, paper_size)
+    except Exception:
+        job_history.finish(history_id, "unknown")
+        raise
+    job_history.finish(history_id, "completed" if dry_run else "pending", result.get("job_id"))
+    return {**result, "history_id": history_id}
+
+
+def _submit(path: Path, copies: int, duplex: str, color: str,
+            page_range: str | None, paper_size: str) -> dict[str, str]:
+    try:
+        pages = len(PdfReader(path).pages)
+    except Exception:
+        pages = 0  # Preserve the legacy MCP submission contract for repairable PDFs.
+    if page_range:
+        selected: set[int] = set()
+        for part in page_range.split(","):
+            bounds = list(map(int, part.split("-")))
+            selected.update(range(bounds[0], bounds[-1] + 1))
+        pages = len(selected)
+    result = _submit_recorded(path, copies, duplex, color, page_range, paper_size, pages=pages)
+    return {"job_id": result["job_id"]}
 
 
 def origin(value: str) -> tuple[str, str, int]:
@@ -401,6 +431,8 @@ def _print_file(path: Path, content_type: str, page_range: str | None, copies: i
                 canvas.showPage()
                 canvas.save()
         if dry_run:
+            history_id = job_history.begin("document", len(selected), copies, True)
+            job_history.finish(history_id, "completed")
             return {"dry_run": True, **info, "selected_pages": sorted(selected),
                     "copies": copies, "color": color, "duplex": duplex, "paper_size": paper_size,
                     "prepared_pdf_bytes": prepared.stat().st_size}
@@ -765,16 +797,24 @@ def print_receipt(text: str, title: str | None = None, cut: bool = True,
             types.ImageContent(type="image", mimeType="image/png",
                                data=base64.b64encode(png).decode("ascii"))])
     if dry_run:
+        history_id = job_history.begin("receipt", 1, 1, True)
+        job_history.finish(history_id, "completed")
         return response({**result, "submitted": False})
     with tempfile.TemporaryDirectory(prefix="print-receipt-") as directory:
         path = Path(directory) / "receipt.bin"
         with path.open("xb") as stream:
             path.chmod(0o600)
             stream.write(receipt.data)
-        output = run("lp", "-h", CUPS, "-d", queue, "-o", "raw", "-t", "Receipt", str(path))
-        match = re.search(rf"request id is ({re.escape(queue)}-\d+)(?!\w)", output)
-        if not match:
-            raise RuntimeError("Submission outcome unknown; inspect list_jobs before retrying.")
+        history_id = job_history.begin("receipt", 1, 1)
+        try:
+            output = run("lp", "-h", CUPS, "-d", queue, "-o", "raw", "-t", "Receipt", str(path))
+            match = re.search(rf"request id is ({re.escape(queue)}-\d+)(?!\w)", output)
+            if not match:
+                raise RuntimeError("Submission outcome unknown; inspect list_jobs before retrying.")
+        except Exception:
+            job_history.finish(history_id, "unknown")
+            raise
+        job_history.finish(history_id, "pending", match[1])
         return response({**result, "job_id": match[1]})
 
 
@@ -934,5 +974,18 @@ def create_app() -> Starlette:
     return app
 
 
+def create_internal_app() -> Starlette:
+    from web_api import CoreAPI
+    import sys
+    return Starlette(routes=CoreAPI(sys.modules[__name__]).routes())
+
+
 if __name__ == "__main__":
-    uvicorn.run(create_app(), host="127.0.0.1", port=8765, access_log=False)
+    import asyncio
+
+    async def main() -> None:
+        public = uvicorn.Server(uvicorn.Config(create_app(), host="127.0.0.1", port=8765, access_log=False))
+        private = uvicorn.Server(uvicorn.Config(create_internal_app(), host="127.0.0.1", port=8772, access_log=False))
+        await asyncio.gather(public.serve(), private.serve())
+
+    asyncio.run(main())

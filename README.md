@@ -1,4 +1,4 @@
-# printmcp
+# Print
 
 A Streamable HTTP MCP server for local CUPS printers, including Epson queues.
 Tools: `print_document`, `print_url`, `create_upload`, `print_upload`,
@@ -55,6 +55,13 @@ before retrying. PDFs are limited to 10 MiB, text to 200,000 characters, copies 
 1–100, and commands to 30 seconds. Printer capabilities determine supported options.
 Ink markers are reported only when available, never guessed. Credentials, client
 assertions and documents belong outside the repo. No automated test submits a job.
+
+## Web interface
+
+`web/` holds an optional browser front end with Print, Queue, Printers and Stats
+pages. It runs as its own Node service behind Cloudflare Access and reaches this
+server only over loopback with a separate bearer token. See
+[`web/README.md`](web/README.md).
 
 ## Development
 
@@ -274,3 +281,22 @@ proxies/Access analytics must redact token paths. Never publish a PUT URL or put
 it into shared logs. Validate using dry runs; a failed/uncertain CUPS submission
 must never be automatically retried. Tests mock all CUPS commands and submit no
 real jobs.
+
+
+## Shared job history and private API
+
+The same Python process runs MCP on loopback port 8765 and the separately bound
+JSON API on loopback port 8772. Keep the private port out of reverse proxies and
+tunnels. Set `PRINT_CORE_TOKEN` for both processes; every private request needs
+its Bearer token. The web app validates its own Access audience on every browser
+request, then forwards only validated print fields to this listener.
+
+`PRINT_HISTORY_DB` selects the local SQLite file. It stores printer, source,
+state, page/copy counts, timestamps, opaque ids and dry-run status, without
+filenames, document text or upload bytes. Keep its directory private and writable
+by the core service. Stats cover the last 30 local calendar days and include
+clearly labelled dry runs. A dry run never sends a CUPS submission.
+
+The web API sends original PDF and image bytes to CUPS without re-rendering.
+Receipt text uses the shared 48-column formatter. Existing MCP tool schemas,
+`/mcp` and signed upload links retain their existing behavior.
