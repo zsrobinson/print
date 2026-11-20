@@ -61,11 +61,11 @@ const METRICS: { id: Metric; label: string }[] = [
 const SERIES: Record<Split, ChartConfig> = {
   printer: {
     document: { label: PRINTER_LABELS.document, color: "var(--chart-1)" },
-    receipt: { label: PRINTER_LABELS.receipt, color: "var(--chart-4)" },
+    receipt: { label: PRINTER_LABELS.receipt, color: "var(--chart-3)" },
   },
   source: {
     web: { label: SOURCE_LABELS.web, color: "var(--chart-1)" },
-    mcp: { label: SOURCE_LABELS.mcp, color: "var(--chart-4)" },
+    mcp: { label: SOURCE_LABELS.mcp, color: "var(--chart-3)" },
   },
 }
 const count = new Intl.NumberFormat()
