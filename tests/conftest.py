@@ -18,7 +18,8 @@ def cups(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def local_environment(monkeypatch):
+def local_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("PRINT_HISTORY_DB", str(tmp_path / "history.sqlite3"))
     monkeypatch.setenv('PRINT_PUBLIC_HOST', 'print.example.com')
     monkeypatch.setattr(urllib.request.OpenerDirector, 'open',
                         Mock(side_effect=AssertionError('Unexpected network request')))
