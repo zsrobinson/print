@@ -1,0 +1,384 @@
+{
+ "groceries": {
+  "text": "# Groceries\n## Produce\n- [ ] Apples | $3.20\n- [x] Pears\n- Bananas, a long description that will certainly need to wrap onto another line | $12\n\n\n\n**Total due**\n---\n1. First\n12. Twelfth item with a fairly long label that wraps over the edge\nPlain paragraph with `code` and __under__ and **inline** bold.",
+  "lines": [
+   {
+    "style": "T",
+    "text": "Groceries"
+   },
+   {
+    "style": "H",
+    "text": " Produce                                        "
+   },
+   {
+    "style": "",
+    "text": "[ ] Apples                                 $3.20"
+   },
+   {
+    "style": "",
+    "text": "[x] Pears"
+   },
+   {
+    "style": "",
+    "text": "- Bananas, a long description that will      $12"
+   },
+   {
+    "style": "",
+    "text": "  certainly need to wrap onto another line"
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "B",
+    "text": "Total due"
+   },
+   {
+    "style": "",
+    "text": "- - - - - - - - - - - - - - - - - - - - - - - -"
+   },
+   {
+    "style": "",
+    "text": "1. First"
+   },
+   {
+    "style": "",
+    "text": "12. Twelfth item with a fairly long label that"
+   },
+   {
+    "style": "",
+    "text": "    wraps over the edge"
+   },
+   {
+    "style": "",
+    "text": "Plain paragraph with code and under and inline"
+   },
+   {
+    "style": "",
+    "text": "bold."
+   }
+  ]
+ },
+ "unicode": {
+  "text": "Caf\u00e9 \u2014 \u201cquoted\u201d \u2026 \u2192 next\tTab\there \u4e2d\u6587 \ud83d\ude00 \uff11\uff12 \u00b2 \u2003wide\u00a0nbsp \u200b",
+  "lines": [
+   {
+    "style": "",
+    "text": "Caf\u00e9 - \"quoted\" ... -> next    Tab here ?? ? 12"
+   },
+   {
+    "style": "",
+    "text": "\u00b2  wide nbsp"
+   }
+  ]
+ },
+ "long_word": {
+  "text": "SupercalifragilisticexpialidociousSupercalifragilisticexpialidociousSupercalifragilisticexpialidociousSupercalifragilisticexpialidocious end",
+  "lines": [
+   {
+    "style": "",
+    "text": "SupercalifragilisticexpialidociousSupercalifragi"
+   },
+   {
+    "style": "",
+    "text": "listicexpialidociousSupercalifragilisticexpialid"
+   },
+   {
+    "style": "",
+    "text": "ociousSupercalifragilisticexpialidocious end"
+   }
+  ]
+ },
+ "pipes": {
+  "text": "Left | right | value\nToo long value | xxxxxxxxxxxxxxxxxxxx\nEmpty | \n* star item | 9\n## Bar | ignored\n# Title text that is long enough to wrap at half width",
+  "lines": [
+   {
+    "style": "",
+    "text": "Left | right                               value"
+   },
+   {
+    "style": "",
+    "text": "Too long value | xxxxxxxxxxxxxxxxxxxx"
+   },
+   {
+    "style": "",
+    "text": "Empty |"
+   },
+   {
+    "style": "",
+    "text": "- star item                                    9"
+   },
+   {
+    "style": "H",
+    "text": " Bar | ignored                                  "
+   },
+   {
+    "style": "T",
+    "text": "Title text that is long"
+   },
+   {
+    "style": "T",
+    "text": "enough to wrap at half"
+   },
+   {
+    "style": "T",
+    "text": "width"
+   }
+  ]
+ },
+ "edges": {
+  "text": "\r\n\r\nline\rline2\n   \n- \n- [X] Upper\n---\n ---\n****\n**a**\n#notitle\n##nosection\n100000000000000000000000000000000000000000000000. huge number prefix item",
+  "lines": [
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": "line"
+   },
+   {
+    "style": "",
+    "text": "line2"
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": "- "
+   },
+   {
+    "style": "",
+    "text": "[x] Upper"
+   },
+   {
+    "style": "",
+    "text": "- - - - - - - - - - - - - - - - - - - - - - - -"
+   },
+   {
+    "style": "",
+    "text": "- - - - - - - - - - - - - - - - - - - - - - - -"
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "B",
+    "text": "a"
+   },
+   {
+    "style": "",
+    "text": "#notitle"
+   },
+   {
+    "style": "",
+    "text": "##nosection"
+   },
+   {
+    "style": "",
+    "text": "100000000000000000000000000000000000000000000000"
+   },
+   {
+    "style": "",
+    "text": ". huge number prefix item"
+   }
+  ]
+ },
+ "crlf_blank_runs": {
+  "text": "a\n\n\n\n\nb\n\n\nc",
+  "lines": [
+   {
+    "style": "",
+    "text": "a"
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": "b"
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": "c"
+   }
+  ]
+ },
+ "narrow": {
+  "text": "# Groceries\n## Produce\n- [ ] Apples | $3.20\n- [x] Pears\n- Bananas, a long description that will certainly need to wrap onto another line | $12\n\n\n\n**Total due**\n---\n1. First\n12. Twelfth item with a fairly long label that wraps over the edge\nPlain paragraph with `code` and __under__ and **inline** bold.",
+  "columns": 24,
+  "lines": [
+   {
+    "style": "T",
+    "text": "Groceries"
+   },
+   {
+    "style": "H",
+    "text": " Produce                "
+   },
+   {
+    "style": "",
+    "text": "[ ] Apples         $3.20"
+   },
+   {
+    "style": "",
+    "text": "[x] Pears"
+   },
+   {
+    "style": "",
+    "text": "- Bananas, a long    $12"
+   },
+   {
+    "style": "",
+    "text": "  description that"
+   },
+   {
+    "style": "",
+    "text": "  will certainly"
+   },
+   {
+    "style": "",
+    "text": "  need to wrap onto"
+   },
+   {
+    "style": "",
+    "text": "  another line"
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "B",
+    "text": "Total due"
+   },
+   {
+    "style": "",
+    "text": "- - - - - - - - - - - -"
+   },
+   {
+    "style": "",
+    "text": "1. First"
+   },
+   {
+    "style": "",
+    "text": "12. Twelfth item with a"
+   },
+   {
+    "style": "",
+    "text": "    fairly long label"
+   },
+   {
+    "style": "",
+    "text": "    that wraps over the"
+   },
+   {
+    "style": "",
+    "text": "    edge"
+   },
+   {
+    "style": "",
+    "text": "Plain paragraph with"
+   },
+   {
+    "style": "",
+    "text": "code and under and"
+   },
+   {
+    "style": "",
+    "text": "inline bold."
+   }
+  ]
+ },
+ "wide": {
+  "text": "# Groceries\n## Produce\n- [ ] Apples | $3.20\n- [x] Pears\n- Bananas, a long description that will certainly need to wrap onto another line | $12\n\n\n\n**Total due**\n---\n1. First\n12. Twelfth item with a fairly long label that wraps over the edge\nPlain paragraph with `code` and __under__ and **inline** bold.",
+  "columns": 64,
+  "lines": [
+   {
+    "style": "T",
+    "text": "Groceries"
+   },
+   {
+    "style": "H",
+    "text": " Produce                                                        "
+   },
+   {
+    "style": "",
+    "text": "[ ] Apples                                                 $3.20"
+   },
+   {
+    "style": "",
+    "text": "[x] Pears"
+   },
+   {
+    "style": "",
+    "text": "- Bananas, a long description that will certainly need to    $12"
+   },
+   {
+    "style": "",
+    "text": "  wrap onto another line"
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "",
+    "text": ""
+   },
+   {
+    "style": "B",
+    "text": "Total due"
+   },
+   {
+    "style": "",
+    "text": "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+   },
+   {
+    "style": "",
+    "text": "1. First"
+   },
+   {
+    "style": "",
+    "text": "12. Twelfth item with a fairly long label that wraps over the"
+   },
+   {
+    "style": "",
+    "text": "    edge"
+   },
+   {
+    "style": "",
+    "text": "Plain paragraph with code and under and inline bold."
+   }
+  ]
+ }
+}
