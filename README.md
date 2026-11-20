@@ -56,6 +56,13 @@ before retrying. PDFs are limited to 10 MiB, text to 200,000 characters, copies 
 Ink markers are reported only when available, never guessed. Credentials, client
 assertions and documents belong outside the repo. No automated test submits a job.
 
+## Web interface
+
+`web/` holds an optional browser front end with Print, Queue, Printers and Stats
+pages. It runs as its own Node service behind Cloudflare Access and reaches this
+server only over loopback with a separate bearer token. See
+[`web/README.md`](web/README.md).
+
 ## Development
 
 ```sh
