@@ -1,3 +1,4 @@
+import { jobIdLabel } from "@/lib/jobs"
 import { Link } from "@tanstack/react-router"
 import {
   Alert,
@@ -45,7 +46,7 @@ export function DryRunField({
 export function JobResult({ job, dryRun }: { job: Job; dryRun: boolean }) {
   const printer = PRINTER_LABELS[job.printer]?.toLowerCase() ?? "selected"
   const detail = [
-    job.id ? `Job ${job.id}` : null,
+    job.id ? `Job ${jobIdLabel(job)}` : null,
     typeof job.pages === "number" ? pagesLabel(job.pages, job.copies) : null,
   ]
     .filter(Boolean)

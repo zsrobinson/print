@@ -114,9 +114,25 @@ const PAGES: {
   { name: "stats", path: "/stats", ready: ".recharts-bar-rectangle" },
 ]
 const VIEWPORTS = [
-  { name: "desktop", width: 1440, height: 960, scale: 1 },
+  { name: "desktop", width: 1440, height: 960, scale: 2 },
   { name: "390", width: 390, height: 844, scale: 2 },
 ] as const
+if (process.env.CAPTURE_360) {
+  // Supplemental narrow-phone verification without repeating the baseline suite.
+  ;(
+    VIEWPORTS as unknown as {
+      name: string
+      width: number
+      height: number
+      scale: number
+    }[]
+  ).splice(0, VIEWPORTS.length, {
+    name: "360",
+    width: 360,
+    height: 800,
+    scale: 2,
+  })
+}
 
 async function shot(page: Page, name: string, fullPage = true) {
   const file = join(OUT, `${name}.png`)
@@ -129,6 +145,10 @@ try {
   const browser = await chromium.launch()
   for (const theme of ["light", "dark"] as const)
     for (const viewport of VIEWPORTS) {
+      await fetch(`http://127.0.0.1:${corePort}/internal/reset`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${CORE_TOKEN}` },
+      })
       const context = await browser.newContext({
         viewport: { width: viewport.width, height: viewport.height },
         deviceScaleFactor: viewport.scale,
@@ -165,7 +185,7 @@ try {
         await page.waitForTimeout(300)
         await shot(page, `queue-cancel-desktop-${theme}`, false)
         await page
-          .getByRole("button", { name: "Cancel", exact: true })
+          .getByRole("button", { name: "Keep job", exact: true })
           .last()
           .click()
         await page.close()

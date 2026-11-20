@@ -81,9 +81,9 @@ const parseDay = (date: string) => Date.parse(`${date.slice(0, 10)}T00:00:00Z`)
 function byDay(daily: DailyStat[], metric: Metric, split: Split) {
   const known = daily.filter((row) => !Number.isNaN(parseDay(row.date)))
   if (!known.length) return []
-  const times = known.map((row) => parseDay(row.date))
-  const start = Math.min(...times)
-  const end = Math.max(...times)
+  const now = new Date()
+  const end = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const start = end - 29 * dayMs
   const keys = Object.keys(SERIES[split])
   const rows = new Map<number, Record<string, number | string>>()
   for (let time = start; time <= end; time += dayMs)
@@ -92,7 +92,8 @@ function byDay(daily: DailyStat[], metric: Metric, split: Split) {
       ...Object.fromEntries(keys.map((key) => [key, 0])),
     })
   for (const row of known) {
-    const target = rows.get(parseDay(row.date))!
+    const target = rows.get(parseDay(row.date))
+    if (!target) continue
     const key = row[split]
     if (key in target) target[key] = Number(target[key]) + (row[metric] || 0)
   }
@@ -123,7 +124,8 @@ function StatsPage() {
           {range ? (
             <PageMeta>
               <span>{range}</span>
-              <span>{data.length} days</span>
+              <span>Last 30 days</span>
+              <span>Includes dry runs</span>
             </PageMeta>
           ) : null}
         </div>
@@ -159,7 +161,7 @@ function StatsPage() {
           <Card className="gap-0 pt-0">
             <CardHeader className="flex flex-col items-stretch gap-0 border-b p-0! sm:flex-row">
               <div
-                role="radiogroup"
+                role="group"
                 aria-label="Measure"
                 className="grid flex-1 grid-cols-3"
               >
@@ -167,8 +169,7 @@ function StatsPage() {
                   <button
                     key={id}
                     type="button"
-                    role="radio"
-                    aria-checked={metric === id}
+                    aria-pressed={metric === id}
                     onClick={() =>
                       void navigate({
                         search: (prev) => ({
@@ -180,8 +181,8 @@ function StatsPage() {
                     }
                     className={cn(
                       "relative flex cursor-pointer flex-col gap-1 border-r px-5 py-4 text-left outline-none first:rounded-tl-xl last:border-r-0 focus-visible:ring-3 focus-visible:ring-ring/30 focus-visible:ring-inset sm:last:border-r",
-                      "after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-primary after:opacity-0 after:transition-opacity aria-checked:after:opacity-100",
-                      "hover:bg-muted/50 aria-checked:bg-muted/40"
+                      "after:absolute after:inset-x-0 after:bottom-[-1px] after:h-0.5 after:bg-primary after:opacity-0 after:transition-opacity aria-pressed:after:opacity-100",
+                      "hover:bg-muted/50 aria-pressed:bg-muted/40"
                     )}
                   >
                     <span className="text-xs text-muted-foreground">
@@ -199,6 +200,7 @@ function StatsPage() {
                   size="sm"
                   spacing={0}
                   aria-label="Split by"
+                  className="shrink-0 flex-nowrap whitespace-nowrap"
                   value={[split]}
                   onValueChange={(value: string[]) => {
                     const next = value[0] as Split | undefined

@@ -431,6 +431,8 @@ def _print_file(path: Path, content_type: str, page_range: str | None, copies: i
                 canvas.showPage()
                 canvas.save()
         if dry_run:
+            history_id = job_history.begin("document", len(selected), copies, True)
+            job_history.finish(history_id, "completed")
             return {"dry_run": True, **info, "selected_pages": sorted(selected),
                     "copies": copies, "color": color, "duplex": duplex, "paper_size": paper_size,
                     "prepared_pdf_bytes": prepared.stat().st_size}
@@ -795,6 +797,8 @@ def print_receipt(text: str, title: str | None = None, cut: bool = True,
             types.ImageContent(type="image", mimeType="image/png",
                                data=base64.b64encode(png).decode("ascii"))])
     if dry_run:
+        history_id = job_history.begin("receipt", 1, 1, True)
+        job_history.finish(history_id, "completed")
         return response({**result, "submitted": False})
     with tempfile.TemporaryDirectory(prefix="print-receipt-") as directory:
         path = Path(directory) / "receipt.bin"
@@ -967,19 +971,21 @@ def create_app() -> Starlette:
         logging.getLogger(__name__).warning(
             "Access JWT validation is DISABLED: ACCESS_TEAM_DOMAIN and ACCESS_AUD are unset; "
             "localhost-only mode. Configure both before exposing the service.")
+    return app
+
+
+def create_internal_app() -> Starlette:
     from web_api import CoreAPI
     import sys
-    private = Starlette(routes=CoreAPI(sys.modules[__name__]).routes())
-    protected_app = app
-
-    async def dispatch(scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] == "http" and scope["path"].startswith("/internal/"):
-            await private(scope, receive, send)
-        else:
-            await protected_app(scope, receive, send)
-
-    return dispatch  # type: ignore[return-value]
+    return Starlette(routes=CoreAPI(sys.modules[__name__]).routes())
 
 
 if __name__ == "__main__":
-    uvicorn.run(create_app(), host="127.0.0.1", port=8765, access_log=False)
+    import asyncio
+
+    async def main() -> None:
+        public = uvicorn.Server(uvicorn.Config(create_app(), host="127.0.0.1", port=8765, access_log=False))
+        private = uvicorn.Server(uvicorn.Config(create_internal_app(), host="127.0.0.1", port=8772, access_log=False))
+        await asyncio.gather(public.serve(), private.serve())
+
+    asyncio.run(main())

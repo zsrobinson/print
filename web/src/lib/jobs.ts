@@ -11,7 +11,7 @@ const ACTIVE = new Set([
   "printing",
   "stopped",
 ])
-const FAILED = new Set(["aborted", "failed", "error"])
+const FAILED = new Set(["aborted", "failed", "error", "unknown"])
 const CANCELLED = new Set(["canceled", "cancelled"])
 
 export const isActive = (job: Pick<Job, "state">) =>
@@ -41,6 +41,7 @@ const JOB_LABELS: Record<string, string> = {
   aborted: "Failed",
   failed: "Failed",
   error: "Failed",
+  unknown: "Outcome unknown",
 }
 
 export function jobLabel(state: string, dryRun = false) {
@@ -88,3 +89,10 @@ export function pagesLabel(pages: number | null | undefined, copies = 1) {
   const base = `${pages} ${pages === 1 ? "page" : "pages"}`
   return copies > 1 ? `${base} × ${copies}` : base
 }
+
+export const jobIdLabel = (job: { id?: unknown; cups_id?: unknown }) =>
+  typeof job.cups_id === "string"
+    ? job.cups_id
+    : typeof job.id === "string"
+      ? job.id.slice(0, 8)
+      : "—"

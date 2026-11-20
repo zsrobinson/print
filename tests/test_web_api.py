@@ -11,7 +11,7 @@ import server
 def client(monkeypatch):
     monkeypatch.setenv('PRINT_CORE_TOKEN', 'test-private-token')
     monkeypatch.setenv('PRINT_RECEIPT_QUEUE', 'thermal')
-    return TestClient(server.create_app())
+    return TestClient(server.create_internal_app(), client=('127.0.0.1', 12345))
 
 
 def test_core_requires_separate_bearer(monkeypatch):
@@ -61,3 +61,15 @@ def test_failed_submission_recorded_at_submit(monkeypatch, tmp_path):
         pass
     assert job_history.jobs()[0]['state'] == 'unknown'
     assert job_history.stats()['totals']['failures'] == 1
+
+
+def test_private_routes_absent_from_mcp_listener(monkeypatch):
+    monkeypatch.setenv('PRINT_CORE_TOKEN', 'test-private-token')
+    with TestClient(server.create_app()) as c:
+        assert c.get('/internal/stats', headers={'Authorization': 'Bearer test-private-token'}).status_code == 404
+
+
+def test_nonloopback_core_peer_rejected(monkeypatch):
+    monkeypatch.setenv('PRINT_CORE_TOKEN', 'test-private-token')
+    with TestClient(server.create_internal_app(), client=('192.0.2.1', 12345)) as c:
+        assert c.get('/internal/stats', headers={'Authorization': 'Bearer test-private-token'}).status_code == 401

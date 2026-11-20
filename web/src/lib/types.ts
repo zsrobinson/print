@@ -16,6 +16,7 @@ export type Printer = {
 
 export type Job = {
   id: string
+  cups_id?: string | null
   printer: PrinterId
   source: JobSource
   state: string

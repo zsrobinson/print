@@ -2,6 +2,7 @@
  * A stand-in for the print core with invented data, for screenshots and local
  * development. It never talks to CUPS: every submission must be a dry run.
  */
+import { createHash } from "node:crypto"
 import { createServer, type Server } from "node:http"
 
 // Relative to start-up, so ages read naturally in screenshots.
@@ -10,6 +11,7 @@ const minutes = (n: number) => new Date(NOW - n * 60_000).toISOString()
 
 type Job = {
   id: string
+  cups_id?: string | null
   printer: "document" | "receipt"
   source: "web" | "mcp"
   state: string
@@ -167,7 +169,13 @@ function stats() {
 }
 
 export function createFixtureCore(token: string): Server {
-  const jobs = seed()
+  const initial = () =>
+    seed().map((job) => ({
+      ...job,
+      cups_id: job.dry_run ? null : job.id,
+      id: createHash("sha256").update(job.id).digest("hex").slice(0, 32),
+    }))
+  const jobs: Job[] = initial()
   let next = 120
   return createServer(async (req, res) => {
     const send = (status: number, body: unknown) => {
@@ -177,6 +185,11 @@ export function createFixtureCore(token: string): Server {
     if (req.headers.authorization !== `Bearer ${token}`)
       return send(401, { error: "Unauthorized" })
     const url = new URL(req.url ?? "/", "http://fixture")
+    if (req.method === "POST" && url.pathname === "/internal/reset") {
+      jobs.splice(0, jobs.length, ...initial())
+      next = 120
+      return send(200, { ok: true })
+    }
     if (req.method === "GET" && url.pathname === "/internal/printers")
       return send(200, {
         printers: [
@@ -190,21 +203,27 @@ export function createFixtureCore(token: string): Server {
             status: {
               printer_state_message: "Printing page 7 of 24",
               reasons: ["none"],
-              accepting: true,
               queried_at: minutes(0.2),
             },
             last_job:
               jobs.find(
                 (j) =>
                   j.printer === "document" &&
+                  !j.dry_run &&
                   !["pending", "processing"].includes(j.state)
               ) ?? null,
           },
           {
             id: "receipt",
             state: "idle",
-            status: { reasons: [], accepting: true },
-            last_job: jobs.find((j) => j.printer === "receipt") ?? null,
+            status: { reasons: [], queried_at: minutes(0.2) },
+            last_job:
+              jobs.find(
+                (j) =>
+                  j.printer === "receipt" &&
+                  !j.dry_run &&
+                  !["pending", "processing"].includes(j.state)
+              ) ?? null,
           },
         ],
       })
@@ -212,8 +231,7 @@ export function createFixtureCore(token: string): Server {
       return send(200, {
         jobs,
         cups: {
-          document:
-            "document-118  web  1258291  Fri 20 Nov 2026 14:59:00\ndocument-119  mcp   311402  Fri 20 Nov 2026 14:59:30",
+          document: "document-118\ndocument-119",
           receipt: "",
         },
       })

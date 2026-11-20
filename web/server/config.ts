@@ -11,7 +11,7 @@ export type PrintConfig = {
   bindAddress: string
 }
 
-export const DEFAULT_CORE_URL = "http://127.0.0.1:8765"
+export const DEFAULT_CORE_URL = "http://127.0.0.1:8772"
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"])
 
 /**

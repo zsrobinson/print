@@ -1,3 +1,4 @@
+import { jobIdLabel } from "@/lib/jobs"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import {
@@ -196,7 +197,7 @@ function JobRow({ job }: { job: Job }) {
   const queryClient = useQueryClient()
   const cancel = useMutation({
     mutationFn: () => cancelJob(job.id),
-    onSuccess: () => toast.success(`Cancelled ${job.id}`),
+    onSuccess: () => toast.success(`Cancelled ${jobIdLabel(job)}`),
     onError: (error) => toast.error(errorMessage(error)),
     onSettled: () => queryClient.invalidateQueries({ queryKey: ["jobs"] }),
   })
@@ -212,7 +213,7 @@ function JobRow({ job }: { job: Job }) {
             {job.dry_run ? <Badge variant="secondary">Dry run</Badge> : null}
           </p>
           <p className="truncate text-sm text-muted-foreground">
-            <span className="font-mono text-xs">{job.id}</span> from{" "}
+            <span className="font-mono text-xs">{jobIdLabel(job)}</span> from{" "}
             {SOURCE_LABELS[job.source] ?? job.source}
           </p>
           <p className="text-sm text-muted-foreground tabular-nums md:hidden">
@@ -232,8 +233,9 @@ function JobRow({ job }: { job: Job }) {
       <span className="col-start-2 flex justify-end empty:hidden md:col-start-auto md:empty:flex">
         {canCancel(job) ? (
           <ConfirmAction
-            title={`Cancel ${job.id}?`}
+            title={`Cancel ${jobIdLabel(job)}?`}
             confirmLabel="Cancel job"
+            dismissLabel="Keep job"
             destructive
             trigger={
               <Button variant="ghost" size="sm" disabled={cancel.isPending}>
@@ -263,7 +265,7 @@ function CupsCard({
   )
   if (!entries.length) return null
   return (
-    <Card size="sm">
+    <Card>
       <CardHeader>
         <CardTitle>CUPS view</CardTitle>
         <CardAction>

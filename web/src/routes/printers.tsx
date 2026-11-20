@@ -1,3 +1,4 @@
+import { jobIdLabel } from "@/lib/jobs"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 import {
@@ -220,9 +221,7 @@ function LastResult({ job }: { job: Record<string, unknown> | null }) {
       <p className="text-sm font-medium">Last result</p>
       <DetailList>
         <DetailRow label="Job">
-          <span className="font-mono text-xs">
-            {text(job.id) ?? String(job.id ?? "—")}
-          </span>
+          <span className="font-mono text-xs">{jobIdLabel(job)}</span>
         </DetailRow>
         <DetailRow label="Result">
           <JobStateBadge state={state} dryRun={job.dry_run === true} />

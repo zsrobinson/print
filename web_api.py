@@ -6,6 +6,9 @@ import os
 from pathlib import Path
 import plistlib
 import tempfile
+import threading
+import time
+from datetime import datetime, timezone
 from typing import Any
 
 import anyio
@@ -19,11 +22,13 @@ class CoreAPI:
     def __init__(self, core: Any) -> None:
         self.core = core
         self.limiter = anyio.CapacityLimiter(2)
+        self.refresh_lock = threading.Lock()
+        self.refreshed_at = 0.0
 
     async def handle(self, request: Request) -> JSONResponse:
         secret = os.environ.get('PRINT_CORE_TOKEN', '')
         peer = request.client.host if request.client else ''
-        if peer not in ('127.0.0.1', '::1', 'testclient') or not secret or not hmac.compare_digest(
+        if peer not in ('127.0.0.1', '::1') or not secret or not hmac.compare_digest(
                 request.headers.get('authorization', ''), 'Bearer ' + secret):
             return JSONResponse({'error': 'Unauthorized'}, status_code=401)
         try:
@@ -72,16 +77,30 @@ class CoreAPI:
             state = ('offline' if 'unavailable' in state_text else 'stopped' if 'disabled' in state_text
                      else 'busy' if 'printing' in state_text else 'idle')
             printers.append({'id': printer, 'state': state,
-                             'status': {'queried_at': raw.get('queried_at'), 'message': state.capitalize()},
-                             'last_job': next((job for job in jobs if job['printer'] == printer), None)})
+                             'status': {'queried_at': int(time.time()), **{key: raw[key] for key in ('queried_at', 'printer_state_message', 'reasons') if key in raw}},
+                             'last_job': next((job for job in jobs if job['printer'] == printer and not job['dry_run']
+                                              and job['state'] in ('completed','canceled','aborted','failed','unknown')), None)})
         return {'printers': printers}
 
     def refresh(self) -> None:
+        if time.monotonic() - self.refreshed_at < 10 or not self.refresh_lock.acquire(blocking=False):
+            return
+        try:
+            self._refresh()
+            self.refreshed_at = time.monotonic()
+        finally:
+            self.refresh_lock.release()
+
+    def _refresh(self) -> None:
         """Read only numeric job state and page counts; never ask CUPS for titles."""
         for printer in ('document', 'receipt'):
+            active = {job['cups_id']: job for job in history.jobs() if job['printer'] == printer
+                      and job['state'] in ('pending', 'held', 'processing', 'stopped')}
+            if not active:
+                continue
             try:
                 queue = self.core._printer_queue(printer)
-                output = self.core.run('ipptool', '-T', '5', '-X',
+                output = self.core.run('ipptool', '-T', '3', '-X',
                     f'ipp://{self.core.CUPS}/printers/{queue}',
                     str(Path(__file__).with_name('jobs.test')))
                 report = plistlib.loads(output.encode())
@@ -89,16 +108,22 @@ class CoreAPI:
                     continue
                 states = {3: 'pending', 4: 'held', 5: 'processing', 6: 'stopped',
                           7: 'canceled', 8: 'aborted', 9: 'completed'}
-                by_cups = {job['cups_id']: job for job in history.jobs() if job['printer'] == printer}
+                seen = set()
                 for test in report['Tests']:
                     if not test.get('Successful'):
                         continue
                     for attributes in test.get('ResponseAttributes', []):
                         number = attributes.get('job-id')
                         state = states.get(attributes.get('job-state'))
-                        job = by_cups.get(f'{queue}-{number}')
+                        cups_id = f'{queue}-{number}'
+                        seen.add(cups_id)
+                        job = active.get(cups_id)
                         if job and state:
                             history.finish(job['id'], state)
+                for cups_id, job in active.items():
+                    age = (datetime.now(timezone.utc) - datetime.fromisoformat(job['created_at'])).total_seconds()
+                    if cups_id not in seen and age > 3600:
+                        history.finish(job['id'], 'unknown')
             except (OSError, RuntimeError, TimeoutError, ValueError, KeyError, TypeError):
                 continue
 
@@ -114,8 +139,7 @@ class CoreAPI:
                     raise ValueError('Receipt requires text')
                 if dry_run:
                     self.core.print_receipt(values['text'], dry_run=True)
-                    job_id = history.begin('receipt', 1, 1, True)
-                    history.finish(job_id, 'completed')
+                    job_id = history.last_submission.get()
                 else:
                     self.core.print_receipt(values['text'])
                     job_id = history.last_submission.get()
@@ -154,6 +178,8 @@ class CoreAPI:
             raise ValueError('Unknown job')
         if job['state'] not in ('pending', 'processing', 'held', 'queued', 'unknown'):
             raise ValueError('Job is not active')
+        if not job['cups_id']:
+            raise ValueError('Submission outcome unknown; check printer before cancelling')
         if job['cups_id']:
             self.core.cancel_job(job['cups_id'], job['printer'])
         history.finish(job_id, 'canceled')
