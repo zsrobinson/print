@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 import os
+import logging
 import sqlite3
 import uuid
 
@@ -44,10 +45,15 @@ def begin(printer: str, pages: int, copies: int, dry_run: bool = False) -> str:
 
 
 def finish(job_id: str, state: str, cups_id: str | None = None) -> None:
-    with connect() as db:
-        db.execute('''UPDATE jobs SET state=?, cups_id=COALESCE(?,cups_id)
-            WHERE id=? AND (state != ? OR (? IS NOT NULL AND cups_id IS NOT ?))''',
-            (state, cups_id, job_id, state, cups_id, cups_id))
+    # CUPS may already have accepted the job. A ledger error must never invite
+    # the caller to retry a successful submission or hide the original error.
+    try:
+        with connect() as db:
+            db.execute('''UPDATE jobs SET state=?, cups_id=COALESCE(?,cups_id)
+                WHERE id=? AND (state != ? OR (? IS NOT NULL AND cups_id IS NOT ?))''',
+                (state, cups_id, job_id, state, cups_id, cups_id))
+    except (OSError, sqlite3.Error):
+        logging.getLogger(__name__).warning('Job history update unavailable')
 
 
 def jobs() -> list[dict[str, Any]]:

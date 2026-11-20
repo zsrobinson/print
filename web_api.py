@@ -51,7 +51,8 @@ class CoreAPI:
                     data = await anyio.to_thread.run_sync(self.submit, values, data_bytes, limiter=self.limiter)
             return JSONResponse(data)
         except (ValueError, TypeError, KeyError):
-            return JSONResponse({'error': 'Invalid print options or document'}, status_code=400)
+            return JSONResponse({'error': 'Job cannot be cancelled in its current state' if request.url.path.endswith('/cancel')
+                                 else 'Invalid print options or document'}, status_code=400)
         except Exception:
             return JSONResponse({'error': 'Printer operation failed; check queue before retrying'}, status_code=502)
 
@@ -176,7 +177,7 @@ class CoreAPI:
         job = next((job for job in history.jobs() if job['id'] == job_id), None)
         if job is None:
             raise ValueError('Unknown job')
-        if job['state'] not in ('pending', 'processing', 'held', 'queued', 'unknown'):
+        if job['state'] not in ('pending', 'processing', 'held', 'stopped'):
             raise ValueError('Job is not active')
         if not job['cups_id']:
             raise ValueError('Submission outcome unknown; check printer before cancelling')

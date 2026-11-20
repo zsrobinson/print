@@ -73,3 +73,20 @@ def test_nonloopback_core_peer_rejected(monkeypatch):
     monkeypatch.setenv('PRINT_CORE_TOKEN', 'test-private-token')
     with TestClient(server.create_internal_app(), client=('192.0.2.1', 12345)) as c:
         assert c.get('/internal/stats', headers={'Authorization': 'Bearer test-private-token'}).status_code == 401
+
+
+def test_history_failure_after_submit_preserves_success(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    import sqlite3
+    path = tmp_path / 'doc'
+    path.write_bytes(b'original')
+    @contextmanager
+    def unavailable():
+        raise sqlite3.OperationalError('private database detail')
+        yield
+    def submit(*args):
+        monkeypatch.setattr(job_history, 'connect', unavailable)
+        return {'job_id': 'epson-42'}
+    monkeypatch.setattr(server, '_submit_raw', submit)
+    result = server._submit_recorded(path, 1, 'one-sided', 'monochrome', None, 'Letter', pages=1)
+    assert result['job_id'] == 'epson-42'

@@ -255,7 +255,11 @@ export function createFixtureCore(token: string): Server {
         return send(422, { error: "The fixture core only accepts dry runs" })
       const printer = form.get("printer") === "receipt" ? "receipt" : "document"
       const job: Job = {
-        id: `${printer}-${next++}`,
+        id: createHash("sha256")
+          .update(`${printer}-${next++}`)
+          .digest("hex")
+          .slice(0, 32),
+        cups_id: null,
         printer,
         source: "web",
         state: "completed",
@@ -274,7 +278,7 @@ export function createFixtureCore(token: string): Server {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const token = process.env.PRINT_CORE_TOKEN
   if (!token) throw Error("Set PRINT_CORE_TOKEN for the fixture core")
-  const port = Number(process.env.FIXTURE_PORT || 8765)
+  const port = Number(process.env.FIXTURE_PORT || 8772)
   createFixtureCore(token).listen(port, "127.0.0.1", () =>
     console.log(`Fixture core on http://127.0.0.1:${port}`)
   )
