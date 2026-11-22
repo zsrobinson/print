@@ -292,10 +292,43 @@ its Bearer token. The web app validates its own Access audience on every browser
 request, then forwards only validated print fields to this listener.
 
 `PRINT_HISTORY_DB` selects the local SQLite file. It stores printer, source,
-state, page/copy counts, timestamps, opaque ids and dry-run status, without
-filenames, document text or upload bytes. Keep its directory private and writable
-by the core service. Stats cover the last 30 local calendar days and include
-clearly labelled dry runs. A dry run never sends a CUPS submission.
+state, page/copy counts, print options, size, timestamps, a state timeline,
+opaque ids, dry-run status, a plain-language failure reason and a display name
+for each job. Names come from the browser filename, a PDF's title, the first
+line of text or a receipt, or a URL's last path segment (never its query or the
+full URL). Older databases are migrated in place; rows from before the
+migration show no name. Keep the ledger's directory private (0700) and writable
+by the core service. Names, receipt text and document bytes stay in the ledger,
+the kept-copies directory and authenticated API responses: they are never
+logged, sent to telemetry or put in error messages.
+
+For "Print again", the core keeps the original bytes it received (or, for
+MCP text, the PDF it laid out) and receipt text for seven days, in
+`PRINT_KEEP_DIR` (default: `kept/` beside the ledger), created 0700 with 0600
+files. `PRINT_KEEP_MAX_BYTES` (default 512 MiB) caps the directory; the oldest
+copies go first. A failure to keep a copy never fails or retries a print.
+
+The private API serves:
+
+- `GET /internal/printers` and `GET /internal/printers/{id}`: state, whether
+  the queue accepts jobs, capabilities (cached ten minutes), the last job, and
+  for one printer its state history, recent jobs and CUPS job ids.
+- `POST /internal/printers/{id}/check`: read-only diagnostics; never submits.
+- `GET /internal/jobs`: filter by name, printer, status (`active`, `finished`,
+  `completed`, `failed`, `canceled`), source, dry run and local date range;
+  paginated with a total.
+- `GET /internal/jobs/{id}` with its timeline, `GET /internal/jobs/{id}/file`
+  for the kept copy, `POST /internal/jobs` to print and
+  `POST /internal/jobs/{id}/cancel`.
+- `POST /internal/fetch`: downloads a public HTTPS PDF up to 10 MiB through the
+  same SSRF protections as `print_url`, without printing or recording it.
+- `GET /internal/stats?range=7d|30d|90d|all`: daily totals, the previous
+  period, jobs by weekday and hour, and job sizes. Dry runs are counted
+  separately. Dates are local.
+
+A background sampler reads each configured queue's CUPS state every 60 seconds
+and records changes only; `PRINT_SAMPLE_SECONDS` changes the interval and `0`
+turns it off. A dry run never sends a CUPS submission.
 
 The web API sends original PDF and image bytes to CUPS without re-rendering.
 Receipt text uses the shared 48-column formatter. Existing MCP tool schemas,

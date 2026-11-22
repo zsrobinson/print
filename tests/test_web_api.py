@@ -32,11 +32,12 @@ def test_image_original_bytes_and_history(monkeypatch):
     with client(monkeypatch) as c:
         result = c.post('/internal/jobs', headers={'Authorization': 'Bearer test-private-token'},
                         files={'file': ('private-name.png', data)},
-                        data={'printer': 'document', 'dry_run': 'false', 'copies': '2'})
+                        data={'printer': 'document', 'dry_run': 'false', 'copies': '2', 'name': 'private-name.png'})
     assert result.status_code == 200
     job = result.json()['job']
     assert (job['source'], job['pages'], job['copies']) == ('web', 1, 2)
-    assert 'private-name' not in str(job_history.jobs())
+    # Names are kept in the private ledger and returned only to the authenticated app.
+    assert (job['name'], job['kind'], job['size_bytes'], job['reprintable']) == ('private-name.png', 'image', len(data), True)
     mock.assert_called_once()
 
 
@@ -47,8 +48,9 @@ def test_receipt_dry_run_no_cups(monkeypatch):
                           data={'printer': 'receipt', 'text': 'Private receipt text', 'dry_run': 'true'})
         assert response.status_code == 200
         stats = job_history.stats()
-    assert stats['totals'] == {'jobs': 1, 'pages': 1, 'failures': 0}
-    assert 'Private receipt' not in str(job_history.jobs())
+    # Dry runs are counted apart from real jobs.
+    assert stats['totals'] == {'jobs': 0, 'pages': 0, 'failures': 0, 'dry_runs': 1}
+    assert job_history.jobs()[0]['name'] == 'Private receipt text'
 
 
 def test_failed_submission_recorded_at_submit(monkeypatch, tmp_path):

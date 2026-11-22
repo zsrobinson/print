@@ -6,6 +6,6 @@
  ATTR language attributes-natural-language en
  ATTR uri printer-uri $uri
  ATTR keyword which-jobs all
- ATTR keyword requested-attributes job-id,job-state,job-impressions-completed
+ ATTR keyword requested-attributes job-id,job-state,job-state-reasons,job-impressions-completed
  STATUS successful-ok
 }
