@@ -169,7 +169,7 @@ function JobView({ job }: { job: JobDetail }) {
               : "This job did not print"}
           </AlertTitle>
           <AlertDescription>
-            <p>
+            <p className="text-foreground">
               {job.error ??
                 "The printer or CUPS stopped it before it finished."}{" "}
               <Link
@@ -224,7 +224,7 @@ function Details({ job }: { job: JobDetail }) {
           params={{ id: job.printer }}
           className="underline-offset-4 hover:underline"
         >
-          {PRINTER_LABELS[job.printer]}
+          {PRINTER_LABELS[job.printer]} printer
         </Link>
       </DetailRow>
       {job.printer === "document" ? (

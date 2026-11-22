@@ -96,8 +96,8 @@ const RANK: Record<PrinterState, number> = {
   stopped: 2,
 }
 const COLOR: Record<PrinterState, string> = {
-  idle: "bg-primary/70",
-  busy: "bg-primary/70",
+  idle: "bg-positive/70",
+  busy: "bg-positive/70",
   offline: "bg-muted-foreground/55",
   stopped: "bg-destructive",
 }
@@ -186,7 +186,7 @@ export function UptimeLegend() {
     <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {(
         [
-          ["Ready", "bg-primary/70"],
+          ["Available", "bg-positive/70"],
           ["Offline", "bg-muted-foreground/55"],
           ["Stopped", "bg-destructive"],
           ["Not recorded", "bg-border"],

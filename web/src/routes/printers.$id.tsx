@@ -249,7 +249,7 @@ function UptimeCard({ printer }: { printer: PrinterDetail }) {
       <CardHeader>
         <CardTitle>Last 7 days</CardTitle>
         <CardAction className="text-sm text-muted-foreground tabular-nums">
-          {share === null ? "No record" : `${formatShare(share)} ready`}
+          {share === null ? "No record" : `${formatShare(share)} available`}
         </CardAction>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">

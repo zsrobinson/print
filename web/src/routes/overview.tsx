@@ -129,7 +129,7 @@ function OverviewPage() {
 
   return (
     <Page>
-      <PageHeader>
+      <PageHeader className="items-start">
         <div className="flex flex-col gap-1">
           <PageTitle>Overview</PageTitle>
           {data ? (
@@ -218,7 +218,8 @@ function OverviewPage() {
                   (data?.daily ?? []).filter((r) => r.source === source),
                   "jobs"
                 ),
-                color: index ? "var(--chart-3)" : "var(--chart-1)",
+                // Sources get their own hues, never the printer pair.
+                color: index ? "var(--chart-4)" : "var(--chart-5)",
               }))}
             />
             <Card className="min-w-0">
@@ -412,7 +413,7 @@ function Delta({
   const value = points ?? delta
   if (value === null || value === undefined || !period)
     return (
-      <span className="truncate text-xs text-muted-foreground">
+      <span className="text-xs text-muted-foreground">
         {detail ?? (period ? "No earlier data" : "Since the first job")}
       </span>
     )
@@ -431,7 +432,7 @@ function Delta({
       ? `${up ? "+" : "−"}${Math.abs(points).toFixed(1)} pts`
       : `${up ? "+" : "−"}${Math.round(Math.abs(value) * 100)}%`
   return (
-    <span className="truncate text-xs text-muted-foreground">
+    <span className="text-xs text-muted-foreground">
       <span className={cn("font-medium tabular-nums", tone)}>{text}</span> vs{" "}
       {period}
     </span>

@@ -124,16 +124,21 @@ function JobsPage() {
   )
   const total = list.data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const activeJobs = (active.data?.jobs ?? []).filter(
-    (job) => !s.printer || job.printer === s.printer
-  )
+  // What is printing now comes first, then the queue in order.
+  const activeJobs = (active.data?.jobs ?? [])
+    .filter((job) => !s.printer || job.printer === s.printer)
+    .sort(
+      (a, b) =>
+        Number(b.state === "processing") - Number(a.state === "processing") ||
+        Date.parse(a.created_at) - Date.parse(b.created_at)
+    )
   const showActive = !s.status && !s.q
   // Nothing to search until something has been printed.
   const showFilters = filtered || (list.data?.total ?? 0) > 0
 
   return (
     <Page>
-      <PageHeader>
+      <PageHeader className="items-start">
         <div className="flex flex-col gap-1">
           <PageTitle>Jobs</PageTitle>
           {list.data ? (
@@ -206,7 +211,7 @@ function JobsPage() {
                     aria-label="Printer"
                     className="min-w-0 flex-1 sm:w-40 sm:flex-none"
                     value={s.printer ?? ""}
-                    placeholder="All printers"
+                    placeholder="Printers"
                     onChange={(value) =>
                       set({
                         printer: (value || undefined) as PrinterId | undefined,
@@ -221,7 +226,7 @@ function JobsPage() {
                     aria-label="Status"
                     className="min-w-0 flex-1 sm:w-40 sm:flex-none"
                     value={s.status ?? ""}
-                    placeholder="Any status"
+                    placeholder="Status"
                     onChange={(value) =>
                       set({
                         status: (value || undefined) as

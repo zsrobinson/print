@@ -19,7 +19,13 @@ import {
 import { Skeleton } from "@zsrobinson/shell/ui/skeleton"
 import { ChevronRightIcon } from "lucide-react"
 import { PrinterIcon, PrinterStateBadge, When } from "@/components/state"
-import { formatShare, spans, uptime, UptimeStrip } from "@/components/uptime"
+import {
+  formatShare,
+  spans,
+  uptime,
+  UptimeLegend,
+  UptimeStrip,
+} from "@/components/uptime"
 import { printerQuery, printersQuery } from "@/lib/api"
 import { Meta } from "@/components/meta"
 import { usePageTitle } from "@/lib/crumb"
@@ -40,7 +46,7 @@ function PrintersPage() {
   const list = printers.data?.printers ?? []
   return (
     <Page>
-      <PageHeader>
+      <PageHeader className="items-start">
         <div className="flex flex-col gap-1">
           <PageTitle>Printers</PageTitle>
           {printers.data ? (
@@ -140,11 +146,14 @@ function PrinterCard({ printer }: { printer: Printer }) {
           <div className="flex items-baseline justify-between text-sm">
             <span className="font-medium">Last 7 days</span>
             <span className="text-muted-foreground tabular-nums">
-              {share === null ? "—" : `${formatShare(share)} ready`}
+              {share === null ? "—" : `${formatShare(share)} available`}
             </span>
           </div>
           {history ? (
-            <UptimeStrip history={history} current={printer.state} bars={56} />
+            <>
+              <UptimeStrip history={history} current={printer.state} />
+              <UptimeLegend />
+            </>
           ) : (
             <Skeleton className="h-8 w-full" />
           )}

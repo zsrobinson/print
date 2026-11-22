@@ -42,9 +42,13 @@ export function elapsed(from: string, to: string) {
 
 /** Relative within a day ("5 minutes ago"), then a date ("Nov 21"). */
 export function shortWhen(ms: number, now = Date.now()) {
-  if (now - ms < 86_400_000)
+  if (now - ms < 20 * 3_600_000)
     return formatRelative(new Date(ms).toISOString(), now)
   const date = new Date(ms)
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (isoDate(date) === isoDate(new Date(now))) return "Today"
+  if (isoDate(date) === isoDate(yesterday)) return "Yesterday"
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",

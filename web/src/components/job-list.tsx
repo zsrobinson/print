@@ -50,7 +50,7 @@ export function JobList({
           )}
         >
           <span>Job</span>
-          <span>Pages</span>
+          <span>Size</span>
           <span>Sent</span>
           <span>Status</span>
           <span className="sr-only">Actions</span>
@@ -78,7 +78,7 @@ function JobRow({ job, cancel }: { job: Job; cancel: boolean }) {
             <Link
               to="/jobs/$id"
               params={{ id: job.id }}
-              className="truncate text-sm font-medium outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-3 focus-visible:after:ring-ring/50"
+              className="line-clamp-2 text-sm font-medium break-words outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-3 focus-visible:after:ring-ring/50 @2xl:truncate"
             >
               {name}
             </Link>
@@ -90,7 +90,9 @@ function JobRow({ job, cancel }: { job: Job; cancel: boolean }) {
             <When value={job.created_at} /> ·{" "}
             {job.printer === "receipt"
               ? `Receipt · ${SOURCE_LABELS[job.source]}`
-              : pagesLabel(job.pages, job.copies)}
+              : typeof job.pages === "number"
+                ? `${job.pages} ${job.pages === 1 ? "page" : "pages"}${job.copies > 1 ? ` ×${job.copies}` : ""}`
+                : pagesLabel(job.pages, job.copies)}
           </p>
         </div>
       </div>
@@ -105,7 +107,7 @@ function JobRow({ job, cancel }: { job: Job; cancel: boolean }) {
       </span>
       <span className="relative z-10 col-start-2 flex justify-end empty:hidden @2xl:col-start-auto @2xl:empty:flex">
         {cancel && canCancel(job) ? (
-          <CancelJob job={job} size="sm" />
+          <CancelJob job={job} size="sm" variant="outline" />
         ) : (
           <ChevronRightIcon
             aria-hidden="true"

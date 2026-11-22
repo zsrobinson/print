@@ -165,11 +165,7 @@ export function ReceiptForm({
   )
   // Layout follows typing without blocking it on long receipts.
   const deferred = useDeferredValue(text)
-  // An empty editor previews its placeholder, dimmed, so both sides agree.
-  const layout = useMemo(
-    () => layoutReceipt(deferred || PLACEHOLDER),
-    [deferred]
-  )
+  const layout = useMemo(() => layoutReceipt(deferred), [deferred])
   const characters = text.length
   const empty = !text.trim()
   const error =
@@ -344,12 +340,12 @@ export function ReceiptForm({
               <Textarea
                 id={id}
                 ref={area}
-                rows={14}
+                rows={9}
                 spellCheck
                 aria-invalid={Boolean(error)}
                 disabled={disabled}
                 placeholder={PLACEHOLDER}
-                className="min-h-72 resize-y font-mono text-sm leading-relaxed"
+                className="min-h-48 resize-y font-mono text-sm leading-relaxed"
                 value={text}
                 onChange={(event) => setText(event.target.value)}
               />
@@ -406,7 +402,7 @@ export function ReceiptForm({
         </Card>
         {result ? <JobResult job={result.job} dryRun={result.dryRun} /> : null}
       </div>
-      <Card className="min-w-0 lg:sticky lg:top-16">
+      <Card className="min-w-0 max-lg:order-first lg:sticky lg:top-16">
         <CardHeader>
           <CardTitle>Preview</CardTitle>
           <CardAction className="text-sm text-muted-foreground tabular-nums">
@@ -414,7 +410,7 @@ export function ReceiptForm({
           </CardAction>
         </CardHeader>
         <CardContent>
-          <ReceiptPreview layout={layout} muted={!deferred} />
+          <ReceiptPreview layout={layout} />
         </CardContent>
       </Card>
     </form>

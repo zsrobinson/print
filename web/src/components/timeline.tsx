@@ -103,7 +103,10 @@ export function JobTimeline({ job }: { job: JobDetail }) {
       .slice(0, index)
       .reverse()
       .find((other) => other.at)?.at
-    return step.at && before && stamp(step.at) === stamp(before)
+    return step.key !== "end" &&
+      step.at &&
+      before &&
+      stamp(step.at) === stamp(before)
       ? { ...step, at: undefined }
       : step
   })
