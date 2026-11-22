@@ -1,12 +1,19 @@
 import { cn } from "@zsrobinson/shell"
-import { formatDateTime, formatRelative } from "@zsrobinson/shell/lib/format"
+import { formatDateTime } from "@zsrobinson/shell/lib/format"
+import { shortWhen } from "@/lib/dates"
 import { Badge } from "@zsrobinson/shell/ui/badge"
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@zsrobinson/shell/ui/tooltip"
-import { FileTextIcon, ReceiptTextIcon } from "lucide-react"
+import {
+  FileImageIcon,
+  FileTextIcon,
+  GlobeIcon,
+  ReceiptTextIcon,
+  SparklesIcon,
+} from "lucide-react"
 import {
   jobLabel,
   jobTone,
@@ -14,12 +21,13 @@ import {
   toMillis,
   type Tone,
 } from "@/lib/jobs"
-import type { PrinterId, PrinterState } from "@/lib/types"
+import type { JobKind, JobSource, PrinterId, PrinterState } from "@/lib/types"
 
 const DOT: Record<Tone, string> = {
-  on: "bg-primary",
-  busy: "bg-primary/60 motion-safe:animate-pulse",
-  off: "bg-muted-foreground/50",
+  ok: "bg-positive",
+  busy: "bg-primary motion-safe:animate-pulse",
+  wait: "border border-muted-foreground bg-transparent",
+  neutral: "bg-muted-foreground/50",
   error: "bg-destructive",
 }
 
@@ -58,7 +66,7 @@ export function JobStateBadge({
   state: string
   dryRun?: boolean
 }) {
-  const tone = jobTone(state)
+  const tone = jobTone(state, dryRun)
   return (
     <Badge variant={tone === "error" ? "destructive" : "outline"}>
       <StateDot tone={tone} className="size-1.5" />
@@ -86,9 +94,39 @@ export function When({ value }: { value: unknown }) {
   return (
     <Tooltip>
       <TooltipTrigger render={<time dateTime={iso} className="tabular-nums" />}>
-        {formatRelative(iso)}
+        {shortWhen(ms)}
       </TooltipTrigger>
       <TooltipContent>{formatDateTime(iso)}</TooltipContent>
     </Tooltip>
   )
+}
+
+/** The kind of job, as an icon: document, image or receipt. */
+export function JobIcon({
+  printer,
+  kind,
+  className,
+}: {
+  printer: PrinterId
+  kind?: JobKind | null
+  className?: string
+}) {
+  const Icon =
+    printer === "receipt"
+      ? ReceiptTextIcon
+      : kind === "image"
+        ? FileImageIcon
+        : FileTextIcon
+  return <Icon aria-hidden="true" className={cn("size-4", className)} />
+}
+
+export function SourceIcon({
+  source,
+  className,
+}: {
+  source: JobSource
+  className?: string
+}) {
+  const Icon = source === "mcp" ? SparklesIcon : GlobeIcon
+  return <Icon aria-hidden="true" className={cn("size-3.5", className)} />
 }

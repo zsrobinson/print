@@ -151,3 +151,9 @@ def test_print_url_accepts_damaged_xref_and_trailing_bytes(download, cups, dry_r
     else:
         assert result == {'job_id': 'epson-23'}
         assert cups.call_count == 1
+
+
+def test_fetch_max_bytes_raises_too_large(download):
+    with pytest.raises(server.DownloadTooLarge, match='size limit'):
+        server.fetch_pdf('https://pdf.example/a', max_bytes=len(PDF) - 1)
+    assert issubclass(server.DownloadTooLarge, ValueError)  # MCP callers still see a ValueError.

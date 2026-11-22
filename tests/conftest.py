@@ -21,6 +21,11 @@ def cups(monkeypatch):
 def local_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("PRINT_HISTORY_DB", str(tmp_path / "history.sqlite3"))
     monkeypatch.setenv('PRINT_PUBLIC_HOST', 'print.example.com')
+    # The internal app's printer sampler would call CUPS; tests start it explicitly.
+    monkeypatch.setenv('PRINT_SAMPLE_SECONDS', '0')
+    monkeypatch.delenv('PRINT_KEEP_DIR', raising=False)
+    monkeypatch.delenv('PRINT_KEEP_MAX_BYTES', raising=False)
+    monkeypatch.setattr(server, '_capabilities', {})
     monkeypatch.setattr(urllib.request.OpenerDirector, 'open',
                         Mock(side_effect=AssertionError('Unexpected network request')))
     monkeypatch.setattr(server.socket, 'getaddrinfo', Mock(side_effect=AssertionError('Unexpected DNS request')))

@@ -17,7 +17,19 @@ import {
   sniff,
 } from "../src/lib/limits"
 import type { PrintConfig } from "./config"
-import { createCore, type CoreReply } from "./core"
+import {
+  createCore,
+  type BinaryType,
+  type CoreFile,
+  type CoreReply,
+} from "./core"
+import {
+  cleanName,
+  isPrinter,
+  jobsSearch,
+  linkUrl,
+  statsSearch,
+} from "./params"
 
 export type PrintServerOptions = {
   config: Omit<PrintConfig, "port" | "bindAddress">
@@ -32,6 +44,16 @@ const FILE_NAMES = {
   "image/png": "image.png",
   "image/jpeg": "image.jpg",
 } as const
+
+/** Download names for binary replies; never derived from the job's name. */
+const DOWNLOAD_NAMES: Record<BinaryType, string> = {
+  "application/pdf": "document.pdf",
+  "image/png": "image.png",
+  "image/jpeg": "image.jpg",
+  "text/plain; charset=utf-8": "receipt.txt",
+}
+/** JSON or form fields for a link fetch: one URL and nothing else. */
+const MAX_FETCH_BODY = 8 * 1024
 
 function sameSecret(supplied: string | null, expected: string) {
   if (!supplied) return false
@@ -73,6 +95,11 @@ export async function buildJob(form: FormData): Promise<FormData | Rejection> {
   const job = new FormData()
   job.set("printer", printer)
   job.set("dry_run", dryRun)
+  // The display name travels on its own; the file part keeps a generic name.
+  const rawName = field("name")
+  if (rawName === false) return { status: 400, error: "Send one name" }
+  const name = rawName === null ? null : cleanName(rawName)
+  if (name) job.set("name", name)
 
   if (printer === "receipt") {
     if (form.has("file"))
@@ -165,13 +192,128 @@ export function createPrintServer({
     await next()
     c.header("Cache-Control", "no-store")
   })
-  for (const resource of ["printers", "jobs", "stats"] as const)
-    app.get(`/api/${resource}`, async (c) =>
-      reply(
-        c,
-        await core("GET", `/internal/${resource}`, { timeoutMs: 10_000 })
-      )
+  const send = (
+    c: {
+      json: (body: unknown, status: CoreReply["status"]) => Response
+      body: (
+        data: Uint8Array<ArrayBuffer>,
+        status: 200,
+        headers: Record<string, string>
+      ) => Response
+    },
+    result: CoreFile | CoreReply
+  ) =>
+    "bytes" in result
+      ? c.body(result.bytes as Uint8Array<ArrayBuffer>, 200, {
+          "Content-Type": result.type,
+          "Content-Length": String(result.bytes.byteLength),
+          "Content-Disposition": `attachment; filename="${DOWNLOAD_NAMES[result.type]}"`,
+          "Cache-Control": "no-store",
+        })
+      : reply(c, result)
+
+  app.get("/api/printers", async (c) =>
+    reply(c, await core("GET", "/internal/printers", { timeoutMs: 10_000 }))
+  )
+  app.get("/api/printers/:id", async (c) => {
+    const id = c.req.param("id")
+    if (!isPrinter(id)) return c.json({ error: "Unknown printer" }, 404)
+    return reply(
+      c,
+      await core("GET", `/internal/printers/${id}`, { timeoutMs: 10_000 })
     )
+  })
+  app.post("/api/printers/:id/check", async (c) => {
+    const id = c.req.param("id")
+    if (!isPrinter(id)) return c.json({ error: "Unknown printer" }, 404)
+    return reply(
+      c,
+      await core("POST", `/internal/printers/${id}/check`, {
+        timeoutMs: 30_000,
+      })
+    )
+  })
+  app.get("/api/jobs", async (c) => {
+    const search = jobsSearch((name) => c.req.queries(name) ?? [])
+    if (!(search instanceof URLSearchParams))
+      return c.json({ error: search.error }, 400)
+    const query = search.size ? `?${search}` : ""
+    return reply(
+      c,
+      await core("GET", `/internal/jobs${query}`, { timeoutMs: 10_000 })
+    )
+  })
+  app.get("/api/jobs/:id", async (c) => {
+    const id = c.req.param("id")
+    if (!JOB_ID.test(id)) return c.json({ error: "Unknown job" }, 400)
+    return reply(
+      c,
+      await core("GET", `/internal/jobs/${encodeURIComponent(id)}`, {
+        timeoutMs: 10_000,
+      })
+    )
+  })
+  app.get("/api/jobs/:id/file", async (c) => {
+    const id = c.req.param("id")
+    if (!JOB_ID.test(id)) return c.json({ error: "Unknown job" }, 400)
+    return send(
+      c,
+      await core.file("GET", `/internal/jobs/${encodeURIComponent(id)}/file`, {
+        timeoutMs: 30_000,
+      })
+    )
+  })
+  app.get("/api/stats", async (c) => {
+    const search = statsSearch((name) => c.req.queries(name) ?? [])
+    if (!(search instanceof URLSearchParams))
+      return c.json({ error: search.error }, 400)
+    const query = search.size ? `?${search}` : ""
+    return reply(
+      c,
+      await core("GET", `/internal/stats${query}`, { timeoutMs: 10_000 })
+    )
+  })
+  app.post(
+    "/api/fetch",
+    bodyLimit({
+      maxSize: MAX_FETCH_BODY,
+      onError: (c) =>
+        c.json({ error: "Links can be up to 2,048 characters" }, 413),
+    }),
+    async (c) => {
+      const type = c.req.header("Content-Type")?.toLowerCase() ?? ""
+      let value: unknown
+      try {
+        if (type.startsWith("application/json")) {
+          const body: unknown = await c.req.json()
+          if (!body || typeof body !== "object" || Array.isArray(body))
+            return c.json({ error: "Send the link as {url}" }, 400)
+          value = (body as { url?: unknown }).url
+        } else if (
+          type.startsWith("application/x-www-form-urlencoded") ||
+          type.startsWith("multipart/form-data")
+        ) {
+          const values = (await c.req.raw.formData()).getAll("url")
+          value = values.length === 1 ? values[0] : undefined
+        } else
+          return c.json({ error: "Send the link as JSON or form data" }, 415)
+      } catch {
+        return c.json({ error: "The request was incomplete or malformed" }, 400)
+      }
+      const url = linkUrl(value)
+      if (typeof url !== "string") return c.json({ error: url.error }, 400)
+      const form = new FormData()
+      form.set("url", url)
+      return send(
+        c,
+        await core.file("POST", "/internal/fetch", {
+          body: form,
+          timeoutMs: 60_000,
+          types: ["application/pdf"],
+        })
+      )
+    }
+  )
   app.post(
     "/api/jobs",
     bodyLimit({

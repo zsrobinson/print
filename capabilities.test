@@ -1,0 +1,10 @@
+{
+ NAME "Printer capabilities"
+ OPERATION Get-Printer-Attributes
+ GROUP operation-attributes-tag
+ ATTR charset attributes-charset utf-8
+ ATTR language attributes-natural-language en
+ ATTR uri printer-uri $uri
+ ATTR keyword requested-attributes sides-supported,media-supported,print-color-mode-supported,printer-make-and-model
+ STATUS successful-ok
+}

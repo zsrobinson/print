@@ -34,7 +34,7 @@ import http.client
 import ipaddress
 import socket
 import ssl
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 import uvicorn
 from starlette.applications import Starlette
 from starlette.datastructures import Headers
@@ -147,6 +147,7 @@ def print_document(
         raise ValueError("Empty or oversized document")
     with tempfile.TemporaryDirectory(prefix="fleet-print-") as directory:
         path = Path(directory) / "document.pdf"
+        name: str | None
         if format == "pdf":
             try:
                 pdf = base64.b64decode(content, validate=True)
@@ -155,13 +156,81 @@ def print_document(
             if not pdf.startswith(b"%PDF-") or len(pdf) > MAX_PDF:
                 raise ValueError("Expected PDF up to 10 MiB")
             path.write_bytes(pdf)
+            del pdf
+            name, kind = _pdf_title(path) or "Document", "pdf"
         elif format in ("text", "markdown"):
             if len(content) > 200_000:
                 raise ValueError("Text limit is 200,000 characters")
             text_pdf(content, path, paper_size)
+            name, kind = _text_name(content), "text"
         else:
             raise ValueError("Invalid document format")
-        return _submit(path, copies, duplex, color, page_range, paper_size)
+        # The kept copy is the PDF that was submitted: the original or the laid-out text.
+        record = {"name": name, "kind": kind, "size_bytes": path.stat().st_size,
+                  "options": _options(duplex, color, page_range, paper_size),
+                  "keep": path, "keep_type": "application/pdf"}
+        return _submit(path, copies, duplex, color, page_range, paper_size, record=record)
+
+
+def _options(duplex: str, color: str, page_range: str | None, paper_size: str) -> dict[str, Any]:
+    return {"sides": duplex, "page_range": page_range, "color": color, "paper_size": paper_size}
+
+
+def _pdf_title(path: Path) -> str | None:
+    """The PDF /Title, when it has a usable one. Never logged."""
+    try:
+        metadata = PdfReader(path, strict=False).metadata
+        title = metadata.title if metadata is not None else None
+        return job_history.clean_name(str(title)) if title else None
+    except Exception:
+        return None
+
+
+def _text_name(content: str) -> str | None:
+    for line in content.splitlines():
+        name = job_history.clean_name(line.lstrip().lstrip("#"))
+        if name:
+            return name
+    return None
+
+
+def _url_name(url: str) -> str | None:
+    """The URL path basename, else the hostname. Never the query or the full URL."""
+    parsed = urlsplit(url)
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    name = job_history.clean_name(unquote(segments[-1])) if segments else None
+    return name or job_history.clean_name(parsed.hostname or "")
+
+
+def _receipt_name(text: str, title: str | None) -> str | None:
+    if title is not None and job_history.clean_name(title):
+        return job_history.clean_name(title)
+    for line in text.splitlines():
+        line = re.sub(r"^\s*#+\s*", "", line)
+        line = re.sub(r"^\s*(?:[-*]\s+)?(?:\[[ xX]?\]\s*)?", "", line)
+        name = job_history.clean_name(line.replace("**", ""))
+        if name:
+            return name
+    return None
+
+
+TIMEOUT_ERROR = "CUPS did not answer in time. The job may still print, so check the queue before retrying."
+UNCONFIRMED_ERROR = "CUPS did not confirm the job. Check the printer before retrying."
+
+
+def submission_error(exc: BaseException) -> str:
+    """A plain reason for the ledger. Never stores or echoes CUPS stderr."""
+    if isinstance(exc, TimeoutError):
+        return TIMEOUT_ERROR
+    message = str(exc)
+    if isinstance(exc, RuntimeError) and message.startswith("CUPS command failed"):
+        lowered = message.lower()
+        if "does not exist" in lowered or "not found" in lowered:
+            return "The printer queue does not exist in CUPS."
+        if "not accepting" in lowered:
+            return "The printer is not accepting jobs."
+        return "CUPS refused the job."
+    return UNCONFIRMED_ERROR
 
 
 def _validate_options(copies: int, duplex: str, color: str, page_range: str | None, paper_size: str) -> None:
@@ -195,21 +264,23 @@ def _submit_raw(path: Path, copies: int, duplex: str, color: str, page_range: st
 
 def _submit_recorded(path: Path, copies: int, duplex: str, color: str,
                      page_range: str | None, paper_size: str, *, pages: int,
-                     dry_run: bool = False) -> dict[str, Any]:
-    history_id = job_history.begin("document", pages, copies, dry_run)
+                     dry_run: bool = False, record: dict[str, Any] | None = None) -> dict[str, Any]:
+    history_id = job_history.begin("document", pages, copies, dry_run, **(record or {}))
     try:
         result = {} if dry_run else _submit_raw(path, copies, duplex, color, page_range, paper_size)
-    except Exception:
-        job_history.finish(history_id, "unknown")
+    except Exception as exc:
+        job_history.finish(history_id, "unknown", error=submission_error(exc))
         raise
     job_history.finish(history_id, "completed" if dry_run else "pending", result.get("job_id"))
     return {**result, "history_id": history_id}
 
 
 def _submit(path: Path, copies: int, duplex: str, color: str,
-            page_range: str | None, paper_size: str) -> dict[str, str]:
+            page_range: str | None, paper_size: str, *, record: dict[str, Any] | None = None) -> dict[str, str]:
+    record = dict(record or {})
     try:
         pages = len(PdfReader(path).pages)
+        record.setdefault("document_pages", pages)
     except Exception:
         pages = 0  # Preserve the legacy MCP submission contract for repairable PDFs.
     if page_range:
@@ -218,7 +289,7 @@ def _submit(path: Path, copies: int, duplex: str, color: str,
             bounds = list(map(int, part.split("-")))
             selected.update(range(bounds[0], bounds[-1] + 1))
         pages = len(selected)
-    result = _submit_recorded(path, copies, duplex, color, page_range, paper_size, pages=pages)
+    result = _submit_recorded(path, copies, duplex, color, page_range, paper_size, pages=pages, record=record)
     return {"job_id": result["job_id"]}
 
 
@@ -274,7 +345,11 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
             raise
 
 
-def fetch_pdf(url: str) -> bytes:
+class DownloadTooLarge(ValueError):
+    """A linked PDF exceeded the byte limit."""
+
+
+def fetch_pdf(url: str, max_bytes: int | None = None) -> bytes:
     """Public HTTPS only: pinned DNS, no credentials, redirects, proxies or cookies."""
     identity = origin(url)
     if identity[0] != "https" or not 1 <= identity[2] <= 65535:
@@ -294,6 +369,8 @@ def fetch_pdf(url: str) -> bytes:
     limit = int(os.environ.get("PRINT_URL_MAX_BYTES", str(50 * 1024 * 1024)))
     if limit <= 0:
         raise ValueError("PRINT_URL_MAX_BYTES must be positive")
+    if max_bytes is not None:
+        limit = min(limit, max_bytes)
     data = bytearray()
     deadline = time.monotonic() + 60
     connection = None
@@ -326,11 +403,13 @@ def fetch_pdf(url: str) -> bytes:
             if not declared.isascii() or not declared.isdigit() or len(declared) > 20:
                 raise ValueError("Invalid PDF download length")
             if int(declared) > limit:
-                raise ValueError("PDF exceeds download size limit")
+                raise DownloadTooLarge("PDF exceeds download size limit")
             while True:
                 chunk = response.read1(65536)
-                if len(data) + len(chunk) > limit or time.monotonic() > deadline:
-                    raise ValueError("PDF exceeds download size or time limit")
+                if len(data) + len(chunk) > limit:
+                    raise DownloadTooLarge("PDF exceeds download size limit")
+                if time.monotonic() > deadline:
+                    raise ValueError("PDF exceeds download time limit")
                 if not chunk:
                     break
                 data.extend(chunk)
@@ -367,7 +446,9 @@ def print_url(
     with tempfile.TemporaryDirectory(prefix="fleet-print-") as directory:
         path = Path(directory) / "document.pdf"
         path.write_bytes(pdf)
-        return _print_file(path, "application/pdf", page_range, copies, color, duplex, paper_size, dry_run)
+        del pdf
+        return _print_file(path, "application/pdf", page_range, copies, color, duplex, paper_size, dry_run,
+                           name=_url_name(url))
 
 
 CONTENT_TYPES = {"pdf": "application/pdf", "png": "image/png", "jpeg": "image/jpeg"}
@@ -402,7 +483,8 @@ def _document_info(data: bytes, content_type: str) -> dict[str, Any]:
 
 
 def _print_file(path: Path, content_type: str, page_range: str | None, copies: int,
-                color: str, duplex: str, paper_size: str, dry_run: bool) -> dict[str, Any]:
+                color: str, duplex: str, paper_size: str, dry_run: bool, *,
+                name: str | None = None) -> dict[str, Any]:
     _validate_options(copies, duplex, color, page_range, paper_size)
     if type(dry_run) is not bool:
         raise ValueError("dry_run must be a boolean")
@@ -416,6 +498,12 @@ def _print_file(path: Path, content_type: str, page_range: str | None, copies: i
             if bounds[-1] > info["pages"]:
                 raise ValueError("Page range outside document")
             selected.update(range(bounds[0], bounds[-1] + 1))
+    is_pdf = content_type == "application/pdf"
+    # Keep the original received bytes, never the prepared image PDF.
+    record = {"name": name or (_pdf_title(path) if is_pdf else None) or ("Uploaded PDF" if is_pdf else "Uploaded image"),
+              "kind": "pdf" if is_pdf else "image", "size_bytes": info["bytes"],
+              "document_pages": info["pages"], "options": _options(duplex, color, page_range, paper_size),
+              "keep": path, "keep_type": content_type}
     with tempfile.TemporaryDirectory(prefix="print-prepare-") as directory:
         prepared = path
         if content_type != "application/pdf":
@@ -431,12 +519,12 @@ def _print_file(path: Path, content_type: str, page_range: str | None, copies: i
                 canvas.showPage()
                 canvas.save()
         if dry_run:
-            history_id = job_history.begin("document", len(selected), copies, True)
+            history_id = job_history.begin("document", len(selected), copies, True, **record)
             job_history.finish(history_id, "completed")
             return {"dry_run": True, **info, "selected_pages": sorted(selected),
                     "copies": copies, "color": color, "duplex": duplex, "paper_size": paper_size,
                     "prepared_pdf_bytes": prepared.stat().st_size}
-        return _submit(prepared, copies, duplex, color, page_range, paper_size)
+        return _submit(prepared, copies, duplex, color, page_range, paper_size, record=record)
 
 
 @dataclass
@@ -666,7 +754,7 @@ STATUS_ATTRIBUTES = frozenset({
 })
 
 
-def _status_attributes(text: str) -> dict[str, Any]:
+def _status_attributes(text: str, allowed: frozenset[str] = STATUS_ATTRIBUTES) -> dict[str, Any]:
     """Read typed IPP arrays; display text loses commas, escaping and types."""
     try:
         report = plistlib.loads(text.encode())
@@ -676,7 +764,7 @@ def _status_attributes(text: str) -> dict[str, Any]:
         attributes: dict[str, Any] = {}
         for group in tests[0]["ResponseAttributes"]:
             for key, value in group.items():
-                if key in STATUS_ATTRIBUTES:
+                if key in allowed:
                     if key in attributes:
                         raise ValueError("Duplicate IPP attribute")
                     attributes[key] = value
@@ -789,6 +877,9 @@ def print_receipt(text: str, title: str | None = None, cut: bool = True,
             "PRINT_FONT", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf")) if preview_image else b""
     result: dict[str, Any] = {"preview": receipt.preview, "lines": receipt.lines,
                               "columns": receipt.columns, "bytes": len(receipt.data)}
+    record: dict[str, Any] = {
+        "name": _receipt_name(text, title), "kind": "receipt", "size_bytes": len(receipt.data),
+        "keep": ((f"# {title}\n" if title else "") + text).encode("utf-8"), "keep_type": "text/plain"}
     def response(fields: dict[str, Any]) -> Any:
         if not preview_image:
             return fields
@@ -797,7 +888,7 @@ def print_receipt(text: str, title: str | None = None, cut: bool = True,
             types.ImageContent(type="image", mimeType="image/png",
                                data=base64.b64encode(png).decode("ascii"))])
     if dry_run:
-        history_id = job_history.begin("receipt", 1, 1, True)
+        history_id = job_history.begin("receipt", 1, 1, True, **record)
         job_history.finish(history_id, "completed")
         return response({**result, "submitted": False})
     with tempfile.TemporaryDirectory(prefix="print-receipt-") as directory:
@@ -805,14 +896,14 @@ def print_receipt(text: str, title: str | None = None, cut: bool = True,
         with path.open("xb") as stream:
             path.chmod(0o600)
             stream.write(receipt.data)
-        history_id = job_history.begin("receipt", 1, 1)
+        history_id = job_history.begin("receipt", 1, 1, **record)
         try:
             output = run("lp", "-h", CUPS, "-d", queue, "-o", "raw", "-t", "Receipt", str(path))
             match = re.search(rf"request id is ({re.escape(queue)}-\d+)(?!\w)", output)
             if not match:
                 raise RuntimeError("Submission outcome unknown; inspect list_jobs before retrying.")
-        except Exception:
-            job_history.finish(history_id, "unknown")
+        except Exception as exc:
+            job_history.finish(history_id, "unknown", error=submission_error(exc))
             raise
         job_history.finish(history_id, "pending", match[1])
         return response({**result, "job_id": match[1]})
@@ -855,6 +946,53 @@ def printer_status(printer: Literal["document", "receipt"] = "document") -> dict
 def list_jobs(completed: bool = False, printer: Literal["document", "receipt"] = "document") -> dict[str, str]:
     """List jobs for document (default) or receipt, optionally including completed jobs."""
     return {"jobs": run("lpstat", "-h", CUPS, "-W", "all" if completed else "not-completed", "-o", _printer_queue(printer))}
+
+
+CAPABILITY_ATTRIBUTES = frozenset({
+    "sides-supported", "media-supported", "print-color-mode-supported", "printer-make-and-model",
+})
+_capabilities: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_capabilities_lock = threading.Lock()
+
+
+def printer_capabilities(printer: Literal["document", "receipt"]) -> dict[str, Any] | None:
+    """What the CUPS queue says it supports; cached ten minutes, None when unknown."""
+    queue = _printer_queue(printer)
+    with _capabilities_lock:
+        cached = _capabilities.get(queue)
+        if cached is not None and time.monotonic() - cached[0] < 600:
+            return cached[1]
+    try:
+        output = run("ipptool", "-T", "10", "-X", f"ipp://{CUPS}/printers/{queue}",
+                     str(Path(__file__).with_name("capabilities.test")))
+        attributes = _status_attributes(output, CAPABILITY_ATTRIBUTES)
+        sides = [value for value in _values(attributes.get("sides-supported"))
+                 if value in ("one-sided", "two-sided-long-edge", "two-sided-short-edge")]
+        modes = _values(attributes.get("print-color-mode-supported"))
+        make = attributes.get("printer-make-and-model")
+        result: dict[str, Any] | None = {
+            "sides": sides, "media": [str(value) for value in _values(attributes.get("media-supported"))],
+            "color": ("color" in modes) if modes else None,
+            "make_model": str(make) if make else None}
+    except (RuntimeError, OSError, TimeoutError, ValueError):
+        result = None
+    with _capabilities_lock:
+        _capabilities[queue] = (time.monotonic(), result)
+    return result
+
+
+def queue_accepting(printer: Literal["document", "receipt"]) -> bool | None:
+    """Whether CUPS accepts new jobs for the queue; None when CUPS does not say."""
+    queue = _printer_queue(printer)
+    try:
+        output = run("lpstat", "-h", CUPS, "-a", queue)
+    except (RuntimeError, OSError, TimeoutError):
+        return None
+    for line in output.splitlines():
+        words = line.split()
+        if words and words[0] == queue:
+            return not (len(words) > 1 and words[1] == "not")
+    return None
 
 
 def cancel_job(job_id: str, printer: Literal["document", "receipt"] = "document") -> dict[str, str]:
@@ -977,7 +1115,24 @@ def create_app() -> Starlette:
 def create_internal_app() -> Starlette:
     from web_api import CoreAPI
     import sys
-    return Starlette(routes=CoreAPI(sys.modules[__name__]).routes())
+    api = CoreAPI(sys.modules[__name__])
+    # PRINT_SAMPLE_SECONDS=0 disables the printer state sampler (tests do).
+    interval = float(os.environ.get("PRINT_SAMPLE_SECONDS", "60"))
+
+    @asynccontextmanager
+    async def lifespan(application: Starlette) -> Any:
+        async def sample() -> None:
+            while True:
+                await anyio.sleep(interval)
+                await anyio.to_thread.run_sync(api.sample)
+        async with anyio.create_task_group() as group:
+            if interval > 0:
+                group.start_soon(sample)
+            try:
+                yield
+            finally:
+                group.cancel_scope.cancel()
+    return Starlette(routes=api.routes(), lifespan=lifespan)
 
 
 if __name__ == "__main__":

@@ -10,18 +10,22 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as PrintersRouteImport } from './routes/printers'
+import { Route as OverviewRouteImport } from './routes/overview'
 import { Route as QueueRouteImport } from './routes/queue'
 import { Route as StatsRouteImport } from './routes/stats'
+import { Route as JobsIndexRouteImport } from './routes/jobs.index'
+import { Route as JobsIdRouteImport } from './routes/jobs.$id'
+import { Route as PrintersIndexRouteImport } from './routes/printers.index'
+import { Route as PrintersIdRouteImport } from './routes/printers.$id'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const PrintersRoute = PrintersRouteImport.update({
-  id: '/printers',
-  path: '/printers',
+const OverviewRoute = OverviewRouteImport.update({
+  id: '/overview',
+  path: '/overview',
   getParentRoute: () => rootRouteImport,
 } as any)
 const QueueRoute = QueueRouteImport.update({
@@ -34,39 +38,100 @@ const StatsRoute = StatsRouteImport.update({
   path: '/stats',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JobsIndexRoute = JobsIndexRouteImport.update({
+  id: '/jobs/',
+  path: '/jobs/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const JobsIdRoute = JobsIdRouteImport.update({
+  id: '/jobs/$id',
+  path: '/jobs/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrintersIndexRoute = PrintersIndexRouteImport.update({
+  id: '/printers/',
+  path: '/printers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrintersIdRoute = PrintersIdRouteImport.update({
+  id: '/printers/$id',
+  path: '/printers/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/printers': typeof PrintersRoute
+  '/overview': typeof OverviewRoute
   '/queue': typeof QueueRoute
   '/stats': typeof StatsRoute
+  '/jobs/$id': typeof JobsIdRoute
+  '/printers/$id': typeof PrintersIdRoute
+  '/jobs/': typeof JobsIndexRoute
+  '/printers/': typeof PrintersIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/printers': typeof PrintersRoute
+  '/overview': typeof OverviewRoute
   '/queue': typeof QueueRoute
   '/stats': typeof StatsRoute
+  '/jobs/$id': typeof JobsIdRoute
+  '/printers/$id': typeof PrintersIdRoute
+  '/jobs': typeof JobsIndexRoute
+  '/printers': typeof PrintersIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/printers': typeof PrintersRoute
+  '/overview': typeof OverviewRoute
   '/queue': typeof QueueRoute
   '/stats': typeof StatsRoute
+  '/jobs/$id': typeof JobsIdRoute
+  '/printers/$id': typeof PrintersIdRoute
+  '/jobs/': typeof JobsIndexRoute
+  '/printers/': typeof PrintersIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/printers' | '/queue' | '/stats'
+  fullPaths:
+    | '/'
+    | '/overview'
+    | '/queue'
+    | '/stats'
+    | '/jobs/$id'
+    | '/printers/$id'
+    | '/jobs/'
+    | '/printers/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/printers' | '/queue' | '/stats'
-  id: '__root__' | '/' | '/printers' | '/queue' | '/stats'
+  to:
+    | '/'
+    | '/overview'
+    | '/queue'
+    | '/stats'
+    | '/jobs/$id'
+    | '/printers/$id'
+    | '/jobs'
+    | '/printers'
+  id:
+    | '__root__'
+    | '/'
+    | '/overview'
+    | '/queue'
+    | '/stats'
+    | '/jobs/$id'
+    | '/printers/$id'
+    | '/jobs/'
+    | '/printers/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  PrintersRoute: typeof PrintersRoute
+  OverviewRoute: typeof OverviewRoute
   QueueRoute: typeof QueueRoute
   StatsRoute: typeof StatsRoute
+  JobsIdRoute: typeof JobsIdRoute
+  PrintersIdRoute: typeof PrintersIdRoute
+  JobsIndexRoute: typeof JobsIndexRoute
+  PrintersIndexRoute: typeof PrintersIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -78,11 +143,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/printers': {
-      id: '/printers'
-      path: '/printers'
-      fullPath: '/printers'
-      preLoaderRoute: typeof PrintersRouteImport
+    '/overview': {
+      id: '/overview'
+      path: '/overview'
+      fullPath: '/overview'
+      preLoaderRoute: typeof OverviewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/queue': {
@@ -99,14 +164,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StatsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/jobs/': {
+      id: '/jobs/'
+      path: '/jobs'
+      fullPath: '/jobs/'
+      preLoaderRoute: typeof JobsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/jobs/$id': {
+      id: '/jobs/$id'
+      path: '/jobs/$id'
+      fullPath: '/jobs/$id'
+      preLoaderRoute: typeof JobsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/printers/': {
+      id: '/printers/'
+      path: '/printers'
+      fullPath: '/printers/'
+      preLoaderRoute: typeof PrintersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/printers/$id': {
+      id: '/printers/$id'
+      path: '/printers/$id'
+      fullPath: '/printers/$id'
+      preLoaderRoute: typeof PrintersIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  PrintersRoute: PrintersRoute,
+  OverviewRoute: OverviewRoute,
   QueueRoute: QueueRoute,
   StatsRoute: StatsRoute,
+  JobsIdRoute: JobsIdRoute,
+  PrintersIdRoute: PrintersIdRoute,
+  JobsIndexRoute: JobsIndexRoute,
+  PrintersIndexRoute: PrintersIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
