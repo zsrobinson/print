@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { after, before, test } from "node:test"
 import { exportJWK, generateKeyPair, SignJWT, type CryptoKey } from "jose"
+import { serve } from "@zsrobinson/shell/server"
 import { createPrintServer } from "../server/app"
 import { coreOrigin, loadConfig } from "../server/config"
 
@@ -22,7 +23,12 @@ let certs: Server
 let core: Server
 let coreUrl: string
 const seen: Seen[] = []
-let coreReply: (request: Seen) => { status: number; body: string } = () => ({
+type CoreAnswer = {
+  status: number
+  body: string | Buffer
+  headers?: Record<string, string>
+}
+let coreReply: (request: Seen) => CoreAnswer = () => ({
   status: 200,
   body: "{}",
 })
@@ -75,11 +81,12 @@ before(async () => {
         body: Buffer.concat(chunks),
       }
       seen.push(request)
-      const { status, body } = coreReply(request)
+      const { status, body, headers } = coreReply(request)
       res.writeHead(status, {
         "Content-Type": "application/json",
         "Set-Cookie": "core=secret",
         "X-Core-Internal": "1",
+        ...headers,
       })
       res.end(body)
     })
@@ -181,6 +188,9 @@ test("every page, asset and API route requires a valid Access assertion", async 
     "/api/printers",
     "/api/jobs",
     "/api/stats",
+    "/api/printers/document",
+    "/api/jobs/document-1",
+    "/api/jobs/document-1/file",
     "/api/missing",
     "/favicon.ico",
   ]) {
@@ -202,6 +212,11 @@ test("every page, asset and API route requires a valid Access assertion", async 
     auth: false,
   })
   assert.equal(upload.status, 401)
+  for (const path of ["/api/fetch", "/api/printers/document/check"])
+    assert.equal(
+      (await call(path, { method: "POST", auth: false })).status,
+      401
+    )
   assert.equal(seen.length, 0, "unauthenticated requests never reach the core")
 
   const page = await call("/")
@@ -234,6 +249,18 @@ test("mutations from another Origin are rejected before the core", async () => {
       origin: origin || null,
     })
     assert.equal(cancel.status, 403)
+    const check = await call("/api/printers/document/check", {
+      method: "POST",
+      origin: origin || null,
+    })
+    assert.equal(check.status, 403)
+    const link = await call("/api/fetch", {
+      method: "POST",
+      origin: origin || null,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com/a.pdf" }),
+    })
+    assert.equal(link.status, 403)
   }
   assert.equal(seen.length, 0)
 })
@@ -572,4 +599,464 @@ test("the core token may only travel to a loopback origin", () => {
       PRINT_CORE_URL: "http://example.test",
     })
   )
+})
+
+const json = (body: unknown): CoreAnswer => ({
+  status: 200,
+  body: JSON.stringify(body),
+})
+
+test("job listings rebuild the query from validated values only", async () => {
+  coreReply = () => json({ jobs: [], total: 0 })
+  seen.length = 0
+  const ok = await call(
+    "/api/jobs?q=%20Lease%20100%25_%20&printer=document&status=failed&source=mcp&dry_run=false&from=2026-01-01&to=2026-01-31&limit=50&offset=100&token=x&queue=other&cups=1"
+  )
+  assert.equal(ok.status, 200)
+  assert.deepEqual(await ok.json(), { jobs: [], total: 0 })
+  const forwarded = new URL(seen[0].url, "http://core")
+  assert.equal(forwarded.pathname, "/internal/jobs")
+  assert.deepEqual(
+    [...forwarded.searchParams],
+    [
+      ["q", "Lease 100%_"],
+      ["printer", "document"],
+      ["status", "failed"],
+      ["source", "mcp"],
+      ["dry_run", "false"],
+      ["from", "2026-01-01"],
+      ["to", "2026-01-31"],
+      ["limit", "50"],
+      ["offset", "100"],
+    ]
+  )
+
+  for (const status of [
+    "active",
+    "finished",
+    "completed",
+    "failed",
+    "canceled",
+  ]) {
+    seen.length = 0
+    assert.equal((await call(`/api/jobs?status=${status}`)).status, 200)
+    assert.equal(seen[0].url, `/internal/jobs?status=${status}`)
+  }
+
+  seen.length = 0
+  await call("/api/jobs?q=&printer=&limit=1&offset=0")
+  assert.equal(seen[0].url, "/internal/jobs?limit=1&offset=0")
+
+  seen.length = 0
+  for (const query of [
+    "q=" + "x".repeat(101),
+    "q=a%00b",
+    "printer=laser",
+    "printer=document&printer=receipt",
+    "status=aborted",
+    "status=ACTIVE",
+    "source=cli",
+    "dry_run=1",
+    "from=2026-02-30",
+    "from=2026-1-1",
+    "to=yesterday",
+    "from=2026-02-02&to=2026-02-01",
+    "limit=0",
+    "limit=101",
+    "limit=-1",
+    "limit=1e2",
+    "offset=100001",
+    "offset=01",
+    "offset=1.5",
+  ]) {
+    const response = await call(`/api/jobs?${query}`)
+    assert.equal(response.status, 400, query)
+    assert.equal(typeof (await response.json()).error, "string")
+  }
+  assert.equal(seen.length, 0, "invalid listings never reach the core")
+})
+
+test("stats ranges are allow-listed", async () => {
+  coreReply = () => json({ range: "7d" })
+  for (const range of ["7d", "30d", "90d", "all"]) {
+    seen.length = 0
+    const response = await call(`/api/stats?range=${range}&debug=1`)
+    assert.equal(response.status, 200)
+    assert.equal(seen[0].url, `/internal/stats?range=${range}`)
+  }
+  seen.length = 0
+  for (const range of ["1y", "7D", "all&range=7d", "%2e%2e"])
+    assert.equal((await call(`/api/stats?range=${range}`)).status, 400, range)
+  assert.equal(seen.length, 0)
+})
+
+test("printer detail and checks accept the two printers only", async () => {
+  coreReply = () => json({ printer: { id: "receipt", history: [] } })
+  seen.length = 0
+  const detail = await call("/api/printers/receipt?queue=other", {
+    headers: { Cookie: "a=b" },
+  })
+  assert.equal(detail.status, 200)
+  assert.equal((await detail.json()).printer.id, "receipt")
+  assert.equal(detail.headers.get("Set-Cookie"), null)
+  assert.equal(seen[0].method, "GET")
+  assert.equal(seen[0].url, "/internal/printers/receipt")
+  assert.equal(seen[0].headers.cookie, undefined)
+
+  seen.length = 0
+  coreReply = () => json({ printer: "document", ok: true, checks: [] })
+  const check = await call("/api/printers/document/check", { method: "POST" })
+  assert.equal(check.status, 200)
+  assert.equal(seen[0].method, "POST")
+  assert.equal(seen[0].url, "/internal/printers/document/check")
+  assert.equal(seen[0].body.length, 0, "a check sends no body")
+
+  seen.length = 0
+  for (const id of ["laser", "DOCUMENT", "..%2Fjobs", "document%2Fcheck"]) {
+    assert.equal((await call(`/api/printers/${id}`)).status, 404, id)
+    const response = await call(`/api/printers/${id}/check`, {
+      method: "POST",
+    })
+    assert.equal(response.status, 404, id)
+  }
+  assert.equal(seen.length, 0)
+})
+
+test("job detail validates the id and relays the core's answer", async () => {
+  coreReply = () => json({ job: { id: "abc123", events: [] } })
+  seen.length = 0
+  const ok = await call("/api/jobs/abc123")
+  assert.equal(ok.status, 200)
+  assert.equal(seen[0].url, "/internal/jobs/abc123")
+  coreReply = () => ({ status: 404, body: '{"error":"Unknown job"}' })
+  const missing = await call("/api/jobs/zzz")
+  assert.equal(missing.status, 404)
+  assert.deepEqual(await missing.json(), { error: "Unknown job" })
+  seen.length = 0
+  for (const id of ["a%20b", "-1", "x".repeat(129), "..%2F..%2Fstats"])
+    assert.ok([400, 404].includes((await call(`/api/jobs/${id}`)).status), id)
+  assert.equal(seen.length, 0)
+})
+
+test("kept files pass through as allow-listed bytes without core headers", async () => {
+  const png = Buffer.concat([
+    Buffer.from("89504e470d0a1a0a", "hex"),
+    Buffer.from([0, 255, 13, 10]),
+  ])
+  const cases: [string, Buffer, string, string][] = [
+    ["application/pdf", PDF, "application/pdf", "document.pdf"],
+    ["image/png", png, "image/png", "image.png"],
+    ["image/jpeg", Buffer.from("ffd8ffe0", "hex"), "image/jpeg", "image.jpg"],
+    [
+      "text/plain; charset=utf-8",
+      Buffer.from("# Groceries\n- [ ] Lemons ✓\n"),
+      "text/plain; charset=utf-8",
+      "receipt.txt",
+    ],
+    [
+      "Text/Plain",
+      Buffer.from("plain"),
+      "text/plain; charset=utf-8",
+      "receipt.txt",
+    ],
+  ]
+  for (const [declared, bytes, type, name] of cases) {
+    seen.length = 0
+    coreReply = () => ({
+      status: 200,
+      body: bytes,
+      headers: {
+        "Content-Type": declared,
+        "Content-Disposition": 'inline; filename="Lease renewal.pdf"',
+        ETag: '"core"',
+      },
+    })
+    const response = await call("/api/jobs/abc123/file", {
+      headers: { Range: "bytes=0-1", Authorization: "Bearer browser" },
+    })
+    assert.equal(response.status, 200, declared)
+    assert.equal(response.headers.get("Content-Type"), type)
+    assert.equal(response.headers.get("Cache-Control"), "no-store")
+    assert.equal(
+      response.headers.get("Content-Disposition"),
+      `attachment; filename="${name}"`
+    )
+    assert.equal(response.headers.get("Set-Cookie"), null)
+    assert.equal(response.headers.get("X-Core-Internal"), null)
+    assert.equal(response.headers.get("ETag"), null)
+    assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff")
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes)
+    assert.equal(seen[0].url, "/internal/jobs/abc123/file")
+    assert.equal(seen[0].headers.authorization, `Bearer ${CORE_TOKEN}`)
+    assert.equal(seen[0].headers.range, undefined)
+  }
+
+  for (const [declared, bytes] of [
+    ["text/html", Buffer.from("<script>alert(1)</script>")],
+    ["image/svg+xml", Buffer.from("<svg/>")],
+    ["application/octet-stream", PDF],
+    ["text/plain; charset=latin1", Buffer.from("x")],
+    ["text/plain", Buffer.from([0xff, 0xfe, 0x00])],
+    ["application/pdf", Buffer.from("<html>not a pdf")],
+    ["image/png", PDF],
+    ["application/json", Buffer.from('{"job":1}')],
+  ] as const) {
+    coreReply = () => ({
+      status: 200,
+      body: bytes,
+      headers: { "Content-Type": declared },
+    })
+    const response = await call("/api/jobs/abc123/file")
+    assert.equal(response.status, 502, declared)
+    assert.match(response.headers.get("Content-Type") ?? "", /json/)
+  }
+
+  coreReply = () => ({
+    status: 200,
+    body: Buffer.concat([PDF, Buffer.alloc(10 * 1024 * 1024 + 64 * 1024)]),
+    headers: { "Content-Type": "application/pdf" },
+  })
+  assert.equal((await call("/api/jobs/abc123/file")).status, 502, "too large")
+
+  coreReply = () => ({
+    status: 404,
+    body: '{"error":"The kept copy has expired"}',
+  })
+  const expired = await call("/api/jobs/abc123/file")
+  assert.equal(expired.status, 404)
+  assert.deepEqual(await expired.json(), {
+    error: "The kept copy has expired",
+  })
+  coreReply = () => ({ status: 500, body: "Traceback /srv/kept/abc123" })
+  const broken = await call("/api/jobs/abc123/file")
+  assert.equal(broken.status, 502)
+  assert.doesNotMatch(await broken.text(), /Traceback|srv/)
+})
+
+test("link fetches send one validated https URL as a form", async () => {
+  coreReply = () => ({
+    status: 200,
+    body: PDF,
+    headers: { "Content-Type": "application/pdf", "X-Upstream": "1" },
+  })
+  seen.length = 0
+  const response = await call("/api/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: "a=b" },
+    body: JSON.stringify({
+      url: "https://example.com/papers/whitepaper-v2.pdf?v=2#page=3",
+      printer: "receipt",
+    }),
+  })
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get("Content-Type"), "application/pdf")
+  assert.equal(response.headers.get("X-Upstream"), null)
+  assert.equal(response.headers.get("Cache-Control"), "no-store")
+  assert.match(response.headers.get("Content-Disposition") ?? "", /^attachment/)
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), PDF)
+  const [request] = seen
+  assert.equal(request.method, "POST")
+  assert.equal(request.url, "/internal/fetch")
+  assert.equal(request.headers.cookie, undefined)
+  assert.equal(
+    part(request, "url")!.body.toString(),
+    "https://example.com/papers/whitepaper-v2.pdf?v=2"
+  )
+  assert.equal(part(request, "printer"), null)
+
+  seen.length = 0
+  const form = new FormData()
+  form.set("url", "https://example.com/a.pdf")
+  assert.equal(
+    (await call("/api/fetch", { method: "POST", body: form })).status,
+    200
+  )
+  assert.equal(
+    part(seen[0], "url")!.body.toString(),
+    "https://example.com/a.pdf"
+  )
+
+  seen.length = 0
+  for (const url of [
+    "http://example.com/a.pdf",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "https://user:pass@example.com/a.pdf",
+    "https://token@example.com/a.pdf",
+    "not a url",
+    "",
+    "https://example.com/" + "a".repeat(2048),
+    42,
+    null,
+  ]) {
+    const reply = await call("/api/fetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    })
+    assert.equal(reply.status, 400, String(url))
+    assert.doesNotMatch(
+      JSON.stringify(await reply.json()),
+      /example\.com|passwd|user:pass/,
+      "errors never echo the link"
+    )
+  }
+  for (const [body, type, status] of [
+    ["{", "application/json", 400],
+    ["[]", "application/json", 400],
+    ["https://example.com/a.pdf", "text/plain", 415],
+    ["x".repeat(9 * 1024), "application/json", 413],
+  ] as const) {
+    const reply = await call("/api/fetch", {
+      method: "POST",
+      headers: { "Content-Type": type },
+      body,
+    })
+    assert.equal(reply.status, status, `${type} ${body.slice(0, 10)}`)
+  }
+  assert.equal(seen.length, 0)
+
+  coreReply = () => ({
+    status: 400,
+    body: '{"error":"That link did not return a PDF"}',
+  })
+  const refused = await call("/api/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: "https://example.com/page" }),
+  })
+  assert.equal(refused.status, 400)
+  assert.deepEqual(await refused.json(), {
+    error: "That link did not return a PDF",
+  })
+  coreReply = () => ({
+    status: 413,
+    body: '{"error":"Linked PDFs can be up to 10 MiB here"}',
+  })
+  const large = await call("/api/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: "https://example.com/big.pdf" }),
+  })
+  assert.equal(large.status, 413)
+  for (const [declared, bytes] of [
+    ["image/png", Buffer.from("89504e470d0a1a0a", "hex")],
+    ["text/plain; charset=utf-8", Buffer.from("hello")],
+  ] as const) {
+    coreReply = () => ({
+      status: 200,
+      body: bytes,
+      headers: { "Content-Type": declared },
+    })
+    const reply = await call("/api/fetch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://example.com/a.pdf" }),
+    })
+    assert.equal(reply.status, 502, `fetch only returns PDFs, not ${declared}`)
+  }
+})
+
+test("job names are sanitised and sent apart from the file", async () => {
+  coreReply = () => ({ status: 201, body: '{"job":{"id":"document-8"}}' })
+  const cases: [string, string | null][] = [
+    ["Lease renewal.pdf", "Lease renewal.pdf"],
+    ["  Boarding pass –\tLisbon.pdf \r\n", "Boarding pass – Lisbon.pdf"],
+    ["a\u0000b\u0007c‮d​e", "a b c d e"],
+    ["\u0000\u0001  \t", null],
+    ["", null],
+    ["é".repeat(130), "é".repeat(120)],
+    ["😀".repeat(121), "😀".repeat(120)],
+  ]
+  for (const [name, expected] of cases) {
+    seen.length = 0
+    const response = await call("/api/jobs", {
+      method: "POST",
+      body: documentForm({ name }),
+    })
+    assert.equal(response.status, 201, JSON.stringify(name))
+    const sent = part(seen[0], "name")
+    assert.equal(
+      sent ? sent.body.toString("utf8") : null,
+      expected,
+      JSON.stringify(name)
+    )
+    assert.match(part(seen[0], "file")!.head, /filename="document.pdf"/)
+  }
+
+  seen.length = 0
+  const receipt = new FormData()
+  receipt.set("printer", "receipt")
+  receipt.set("text", "Groceries\n- milk")
+  receipt.set("name", "Groceries")
+  await call("/api/jobs", { method: "POST", body: receipt })
+  assert.equal(part(seen[0], "name")!.body.toString(), "Groceries")
+
+  seen.length = 0
+  const twice = documentForm()
+  twice.append("name", "one")
+  twice.append("name", "two")
+  const asFile = documentForm()
+  asFile.set("name", new Blob(["x"]), "x.txt")
+  for (const body of [twice, asFile])
+    assert.equal(
+      (await call("/api/jobs", { method: "POST", body })).status,
+      400
+    )
+  assert.equal(seen.length, 0)
+})
+
+test("new routes log route patterns, never names, ids or links", async () => {
+  logs.length = 0
+  coreReply = () => ({
+    status: 200,
+    body: PDF,
+    headers: { "Content-Type": "application/pdf" },
+  })
+  await call("/api/jobs/secretjob42/file")
+  await call("/api/fetch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: "https://example.com/private-plan.pdf" }),
+  })
+  coreReply = () => json({ jobs: [], total: 0 })
+  await call("/api/jobs?q=Lease%20renewal")
+  await call("/api/printers/receipt")
+  const text = JSON.stringify(logs)
+  assert.doesNotMatch(text, /secretjob42|private-plan|example\.com|Lease/)
+  const routes = logs.map((entry) => (entry as { route: string }).route)
+  for (const route of [
+    "/api/jobs/:id/file",
+    "/api/fetch",
+    "/api/jobs",
+    "/api/printers/:id",
+  ])
+    assert.ok(routes.includes(route), route)
+})
+
+test("replies survive the Node adapter's own Response class", async () => {
+  // serve() swaps the global Response, as it does in production.
+  const server = await new Promise<Server>((resolve) => {
+    const started: Server = serve(
+      { fetch: app().fetch, hostname: "127.0.0.1", port: 0 },
+      () => resolve(started)
+    ) as Server
+  })
+  try {
+    const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+    const headers = { "Cf-Access-Jwt-Assertion": await token() }
+    coreReply = () => json({ printers: [{ id: "document" }] })
+    const printers = await fetch(`${base}/api/printers`, { headers })
+    assert.deepEqual(await printers.json(), { printers: [{ id: "document" }] })
+    coreReply = () => ({
+      status: 200,
+      body: PDF,
+      headers: { "Content-Type": "application/pdf" },
+    })
+    const file = await fetch(`${base}/api/jobs/abc123/file`, { headers })
+    assert.equal(file.status, 200)
+    assert.deepEqual(Buffer.from(await file.arrayBuffer()), PDF)
+  } finally {
+    await new Promise((r) => server.close(r))
+  }
 })
