@@ -1,4 +1,3 @@
-import { jobIdLabel } from "@/lib/jobs"
 import { Link } from "@tanstack/react-router"
 import {
   Alert,
@@ -16,7 +15,7 @@ import {
 import { Switch } from "@zsrobinson/shell/ui/switch"
 import { CircleCheckIcon } from "lucide-react"
 import { useId } from "react"
-import { PRINTER_LABELS, pagesLabel } from "@/lib/jobs"
+import { jobName, PRINTER_LABELS, pagesLabel } from "@/lib/jobs"
 import type { Job } from "@/lib/types"
 
 export function DryRunField({
@@ -42,15 +41,9 @@ export function DryRunField({
   )
 }
 
-/** What the core accepted, in its own words: id, pages and whether it printed. */
+/** What the core accepted, with a link to follow the job. */
 export function JobResult({ job, dryRun }: { job: Job; dryRun: boolean }) {
   const printer = PRINTER_LABELS[job.printer]?.toLowerCase() ?? "selected"
-  const detail = [
-    job.id ? `Job ${jobIdLabel(job)}` : null,
-    typeof job.pages === "number" ? pagesLabel(job.pages, job.copies) : null,
-  ]
-    .filter(Boolean)
-    .join(", ")
   return (
     <Alert role="status">
       <CircleCheckIcon />
@@ -58,21 +51,22 @@ export function JobResult({ job, dryRun }: { job: Job; dryRun: boolean }) {
         {dryRun ? "Check passed" : `Sent to the ${printer} printer`}
       </AlertTitle>
       <AlertDescription>
-        {detail ? `${detail}. ` : ""}
-        {dryRun ? "Nothing was printed." : "Follow it in the queue."}
+        {jobName(job)}
+        {typeof job.pages === "number" && job.printer === "document"
+          ? `, ${pagesLabel(job.pages, job.copies)}`
+          : ""}
+        . {dryRun ? "Nothing was printed." : null}
       </AlertDescription>
-      {dryRun ? null : (
-        <AlertAction>
-          <Button
-            size="sm"
-            variant="outline"
-            render={<Link to="/queue" />}
-            nativeButton={false}
-          >
-            View queue
-          </Button>
-        </AlertAction>
-      )}
+      <AlertAction>
+        <Button
+          size="sm"
+          variant="outline"
+          render={<Link to="/jobs/$id" params={{ id: job.id }} />}
+          nativeButton={false}
+        >
+          {dryRun ? "Details" : "Follow it"}
+        </Button>
+      </AlertAction>
     </Alert>
   )
 }

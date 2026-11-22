@@ -1,4 +1,4 @@
-import { useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { toast } from "@zsrobinson/shell"
 import { errorMessage } from "@zsrobinson/shell/lib/api"
 import { Button } from "@zsrobinson/shell/ui/button"
@@ -16,6 +16,15 @@ import {
   FieldError,
   FieldLabel,
 } from "@zsrobinson/shell/ui/field"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@zsrobinson/shell/ui/dropdown-menu"
 import { Spinner } from "@zsrobinson/shell/ui/spinner"
 import { Textarea } from "@zsrobinson/shell/ui/textarea"
 import {
@@ -31,15 +40,34 @@ import {
   useRef,
   useState,
 } from "react"
-import { submitJob } from "@/lib/api"
+import {
+  ChevronDownIcon,
+  FileClockIcon,
+  SaveIcon,
+  Trash2Icon,
+} from "lucide-react"
+import { jobQuery, jobsQuery, keptFile, submitJob } from "@/lib/api"
+import { stamp } from "@/lib/dates"
+import {
+  draftTitle,
+  listDrafts,
+  readWorking,
+  saveDraft,
+  STARTERS,
+  writeWorking,
+  type Draft,
+} from "@/lib/drafts"
+import { jobName } from "@/lib/jobs"
 import { MAX_RECEIPT_CHARACTERS } from "@/lib/limits"
 import { layoutReceipt, MAX_RECEIPT_LINES } from "@/lib/receipt"
-import type { Job } from "@/lib/types"
+import type { Job, Printer } from "@/lib/types"
 import { DryRunField, JobResult } from "./job-result"
+import { PrinterNotice } from "./printer-notice"
 import { ReceiptPreview } from "./receipt-preview"
 
-const DRAFT_KEY = "print.receipt.draft"
 const count = new Intl.NumberFormat()
+const PLACEHOLDER =
+  "# Errands\n## Today\n- [ ] Pick up stamps\n- [ ] Return library books\nCoffee beans | $14"
 
 /** Markup the receipt layout understands, inserted at the cursor. */
 const SNIPPETS = [
@@ -80,19 +108,55 @@ const SNIPPETS = [
   },
 ] as const
 
-function readDraft() {
-  try {
-    return sessionStorage.getItem(DRAFT_KEY) ?? ""
-  } catch {
-    return ""
-  }
-}
+/** Recent receipts the print service still keeps, to reuse their text. */
+const recentReceipts = jobsQuery({ printer: "receipt", limit: 20 })
 
-export function ReceiptForm({ disabled }: { disabled?: boolean }) {
+export function ReceiptForm({
+  printer,
+  disabled,
+  again,
+}: {
+  printer?: Printer
+  disabled?: boolean
+  /** A receipt job whose kept text fills the editor. */
+  again?: string
+}) {
   const queryClient = useQueryClient()
   const id = useId()
   const area = useRef<HTMLTextAreaElement>(null)
-  const [text, setText] = useState(readDraft)
+  const [text, setText] = useState(readWorking)
+  const [drafts, setDrafts] = useState<Draft[]>(listDrafts)
+  const recent = useQuery(recentReceipts)
+  const reusable = (recent.data?.jobs ?? [])
+    .filter((job) => job.reprintable)
+    .slice(0, 6)
+  const prefilled = useRef<string | null>(null)
+  useEffect(() => {
+    if (!again || prefilled.current === again) return
+    prefilled.current = again
+    void queryClient.fetchQuery(jobQuery(again)).then(
+      ({ job }) => {
+        if (job.printer !== "receipt") return
+        if (job.receipt_text) {
+          setText(job.receipt_text)
+          toast.success(`Loaded ${jobName(job)}`)
+        } else toast.error("The kept text has expired")
+      },
+      (error) => toast.error(errorMessage(error))
+    )
+  }, [again, queryClient])
+
+  /** Replace the editor's text, keeping what was there as a draft. */
+  function load(next: string) {
+    if (text.trim() && text !== next) {
+      saveDraft(text)
+      setDrafts(listDrafts())
+    }
+    setText(next)
+    setResult(null)
+    setTouched(false)
+    requestAnimationFrame(() => area.current?.focus())
+  }
   const [dryRun, setDryRun] = useState(false)
   const [pending, setPending] = useState(false)
   const [touched, setTouched] = useState(false)
@@ -101,7 +165,11 @@ export function ReceiptForm({ disabled }: { disabled?: boolean }) {
   )
   // Layout follows typing without blocking it on long receipts.
   const deferred = useDeferredValue(text)
-  const layout = useMemo(() => layoutReceipt(deferred), [deferred])
+  // An empty editor previews its placeholder, dimmed, so both sides agree.
+  const layout = useMemo(
+    () => layoutReceipt(deferred || PLACEHOLDER),
+    [deferred]
+  )
   const characters = text.length
   const empty = !text.trim()
   const error =
@@ -113,14 +181,7 @@ export function ReceiptForm({ disabled }: { disabled?: boolean }) {
           ? "Write the receipt text first."
           : null
 
-  useEffect(() => {
-    try {
-      if (text) sessionStorage.setItem(DRAFT_KEY, text)
-      else sessionStorage.removeItem(DRAFT_KEY)
-    } catch {
-      // Drafts are a convenience; private windows may refuse storage.
-    }
-  }, [text])
+  useEffect(() => writeWorking(text), [text])
 
   function insert(snippet: (typeof SNIPPETS)[number]) {
     const node = area.current
@@ -166,8 +227,93 @@ export function ReceiptForm({ disabled }: { disabled?: boolean }) {
       <div className="flex min-w-0 flex-col gap-4">
         <Card>
           <CardContent className="flex flex-col gap-6">
+            {printer ? <PrinterNotice printer={printer} /> : null}
             <Field data-invalid={Boolean(error)}>
-              <FieldLabel htmlFor={id}>Text</FieldLabel>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <FieldLabel htmlFor={id}>Text</FieldLabel>
+                <div className="flex items-center gap-1">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={disabled || pending}
+                        />
+                      }
+                    >
+                      Start from
+                      <ChevronDownIcon data-icon="inline-end" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-64">
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel>Starters</DropdownMenuLabel>
+                        {STARTERS.map((starter) => (
+                          <DropdownMenuItem
+                            key={starter.id}
+                            onClick={() => load(starter.text)}
+                          >
+                            {starter.label}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                      {drafts.length ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuGroup>
+                            <DropdownMenuLabel>Saved drafts</DropdownMenuLabel>
+                            {drafts.slice(0, 6).map((draft) => (
+                              <DropdownMenuItem
+                                key={draft.id}
+                                onClick={() => load(draft.text)}
+                              >
+                                <span className="min-w-0 flex-1 truncate">
+                                  {draftTitle(draft.text)}
+                                </span>
+                                <span className="shrink-0 text-xs text-muted-foreground">
+                                  {stamp(
+                                    new Date(draft.saved_at).toISOString()
+                                  )}
+                                </span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuGroup>
+                        </>
+                      ) : null}
+                      {reusable.length ? (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuGroup>
+                            <DropdownMenuLabel>
+                              Recent receipts
+                            </DropdownMenuLabel>
+                            {reusable.map((job) => (
+                              <DropdownMenuItem
+                                key={job.id}
+                                onClick={() =>
+                                  void keptFile(job.id)
+                                    .then((blob) => blob.text())
+                                    .then(load, () =>
+                                      toast.error(
+                                        "That receipt's text has expired"
+                                      )
+                                    )
+                                }
+                              >
+                                <FileClockIcon />
+                                <span className="min-w-0 flex-1 truncate">
+                                  {jobName(job)}
+                                </span>
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuGroup>
+                        </>
+                      ) : null}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
               <div
                 role="toolbar"
                 aria-label="Insert formatting"
@@ -180,7 +326,7 @@ export function ReceiptForm({ disabled }: { disabled?: boolean }) {
                         <Button
                           type="button"
                           size="xs"
-                          variant="ghost"
+                          variant="outline"
                           disabled={disabled || pending}
                           onClick={() => insert(snippet)}
                         />
@@ -202,9 +348,7 @@ export function ReceiptForm({ disabled }: { disabled?: boolean }) {
                 spellCheck
                 aria-invalid={Boolean(error)}
                 disabled={disabled}
-                placeholder={
-                  "# Errands\n## Today\n- [ ] Pick up stamps\nCoffee beans | $14"
-                }
+                placeholder={PLACEHOLDER}
                 className="min-h-72 resize-y font-mono text-sm leading-relaxed"
                 value={text}
                 onChange={(event) => setText(event.target.value)}
@@ -213,8 +357,8 @@ export function ReceiptForm({ disabled }: { disabled?: boolean }) {
                 <FieldError>{error}</FieldError>
               ) : (
                 <FieldDescription className="tabular-nums">
-                  {layout.lines.length} of {MAX_RECEIPT_LINES} lines,{" "}
-                  {count.format(characters)} of{" "}
+                  {deferred ? layout.lines.length : 0} of {MAX_RECEIPT_LINES}{" "}
+                  lines, {count.format(characters)} of{" "}
                   {count.format(MAX_RECEIPT_CHARACTERS)} characters
                 </FieldDescription>
               )}
@@ -226,20 +370,37 @@ export function ReceiptForm({ disabled }: { disabled?: boolean }) {
               {pending ? <Spinner data-icon="inline-start" /> : null}
               {dryRun ? "Check receipt" : "Print receipt"}
             </Button>
-            {text ? (
-              <Button
-                type="button"
-                variant="ghost"
-                disabled={pending}
-                onClick={() => {
-                  setText("")
-                  setTouched(false)
-                  setResult(null)
-                  area.current?.focus()
-                }}
-              >
-                Clear
-              </Button>
+            {text.trim() ? (
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => {
+                    saveDraft(text)
+                    setDrafts(listDrafts())
+                    toast.success("Saved as a draft in this browser")
+                  }}
+                >
+                  <SaveIcon data-icon="inline-start" />
+                  Save draft
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="ml-auto"
+                  disabled={pending}
+                  onClick={() => {
+                    setText("")
+                    setTouched(false)
+                    setResult(null)
+                    area.current?.focus()
+                  }}
+                >
+                  <Trash2Icon data-icon="inline-start" />
+                  Clear
+                </Button>
+              </>
             ) : null}
           </CardFooter>
         </Card>
@@ -253,7 +414,7 @@ export function ReceiptForm({ disabled }: { disabled?: boolean }) {
           </CardAction>
         </CardHeader>
         <CardContent>
-          <ReceiptPreview layout={layout} />
+          <ReceiptPreview layout={layout} muted={!deferred} />
         </CardContent>
       </Card>
     </form>

@@ -1,6 +1,11 @@
-import type { Job, JobSource, PrinterId, PrinterState } from "./types"
+import type { Duplex } from "./limits"
+import type { Job, JobKind, JobSource, PrinterId, PrinterState } from "./types"
 
-export type Tone = "on" | "busy" | "off" | "error"
+/**
+ * One status scale for jobs and printers: ok (done or ready), busy (printing),
+ * wait (queued), neutral (cancelled, dry run, offline) and error.
+ */
+export type Tone = "ok" | "busy" | "wait" | "neutral" | "error"
 
 const ACTIVE = new Set([
   "pending",
@@ -19,12 +24,14 @@ export const isActive = (job: Pick<Job, "state">) =>
 
 export const canCancel = (job: Job) => isActive(job) && !job.dry_run
 
-export function jobTone(state: string): Tone {
+export function jobTone(state: string, dryRun = false): Tone {
   const value = state.toLowerCase()
+  if (dryRun && value === "completed") return "neutral"
   if (FAILED.has(value)) return "error"
   if (value === "processing" || value === "printing") return "busy"
-  if (ACTIVE.has(value)) return "on"
-  return "off"
+  if (ACTIVE.has(value)) return "wait"
+  if (value === "completed") return "ok"
+  return "neutral"
 }
 
 const JOB_LABELS: Record<string, string> = {
@@ -46,7 +53,7 @@ const JOB_LABELS: Record<string, string> = {
 
 export function jobLabel(state: string, dryRun = false) {
   const value = state.toLowerCase()
-  if (dryRun && value === "completed") return "Checked"
+  if (dryRun && value === "completed") return "Dry run"
   if (JOB_LABELS[value]) return JOB_LABELS[value]
   return value ? value[0].toUpperCase() + value.slice(1) : "Unknown"
 }
@@ -59,17 +66,17 @@ export const PRINTER_LABELS: Record<PrinterId, string> = {
 }
 export const SOURCE_LABELS: Record<JobSource, string> = {
   web: "Web",
-  mcp: "MCP",
+  mcp: "Claude",
 }
 
 export const PRINTER_STATE: Record<
   PrinterState,
   { label: string; tone: Tone }
 > = {
-  idle: { label: "Ready", tone: "on" },
+  idle: { label: "Ready", tone: "ok" },
   busy: { label: "Printing", tone: "busy" },
   stopped: { label: "Stopped", tone: "error" },
-  offline: { label: "Offline", tone: "off" },
+  offline: { label: "Offline", tone: "neutral" },
 }
 
 /** Milliseconds from an ISO string or Unix seconds/milliseconds. */
@@ -85,10 +92,40 @@ export function toMillis(value: unknown) {
 }
 
 export function pagesLabel(pages: number | null | undefined, copies = 1) {
-  if (typeof pages !== "number") return copies > 1 ? `× ${copies}` : "—"
+  if (typeof pages !== "number") return copies > 1 ? `${copies} copies` : "—"
   const base = `${pages} ${pages === 1 ? "page" : "pages"}`
-  return copies > 1 ? `${base} × ${copies}` : base
+  return copies > 1 ? `${base} · ${copies} copies` : base
 }
+
+/** A human name for any job, including rows recorded before names were kept. */
+export function jobName(job: Pick<Job, "name" | "printer" | "kind">) {
+  if (job.name) return job.name
+  if (job.printer === "receipt") return "Untitled receipt"
+  return job.kind === "image" ? "Untitled image" : "Untitled document"
+}
+
+export const KIND_LABELS: Record<JobKind, string> = {
+  pdf: "PDF",
+  image: "Image",
+  text: "Text, laid out as PDF",
+  receipt: "Receipt text",
+}
+
+export const SIDES_LABELS: Record<Duplex, string> = {
+  "one-sided": "One-sided",
+  "two-sided-long-edge": "Two-sided, long edge",
+  "two-sided-short-edge": "Two-sided, short edge",
+}
+
+export const STATUS_FILTERS = {
+  active: "Active",
+  completed: "Printed",
+  failed: "Failed",
+  canceled: "Cancelled",
+} as const
+export type StatusFilter = keyof typeof STATUS_FILTERS
+
+export const isFailed = (state: string) => FAILED.has(state.toLowerCase())
 
 export const jobIdLabel = (job: { id?: unknown; cups_id?: unknown }) =>
   typeof job.cups_id === "string"

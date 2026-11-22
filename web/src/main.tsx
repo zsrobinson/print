@@ -33,6 +33,10 @@ declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router
   }
+  interface StaticDataRouteOption {
+    /** Section path; the open detail page adds its own label after these. */
+    crumbs?: { label: string; to: string }[]
+  }
 }
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -8,17 +8,26 @@ import { DocumentForm } from "@/components/document-form"
 import { ReceiptForm } from "@/components/receipt-form"
 import { PrinterIcon } from "@/components/state"
 import { printersQuery } from "@/lib/api"
+import { usePageTitle } from "@/lib/crumb"
 import { PRINTER_LABELS } from "@/lib/jobs"
-import { PRINTERS, type PrinterId } from "@/lib/limits"
+import { JOB_ID, PRINTERS, type PrinterId } from "@/lib/limits"
+
+type PrintSearch = { printer?: "receipt"; again?: string }
 
 export const Route = createFileRoute("/")({
-  validateSearch: (search): { printer?: PrinterId } =>
-    search.printer === "receipt" ? { printer: "receipt" } : {},
+  validateSearch: (search: Record<string, unknown>): PrintSearch => ({
+    ...(search.printer === "receipt" ? { printer: "receipt" as const } : {}),
+    ...(typeof search.again === "string" && JOB_ID.test(search.again)
+      ? { again: search.again }
+      : {}),
+  }),
+  staticData: { crumbs: [{ label: "Print", to: "/" }] },
   component: PrintPage,
 })
 
 function PrintPage() {
-  const { printer = "document" } = Route.useSearch()
+  usePageTitle("Print")
+  const { printer = "document", again } = Route.useSearch()
   const navigate = useNavigate({ from: "/" })
   const printers = useQuery(printersQuery)
   const current = printers.data?.printers.find((p) => p.id === printer)
@@ -36,8 +45,8 @@ function PrintPage() {
             aria-label="Printer"
             value={[printer]}
             onValueChange={(values: string[]) => {
-              const value = values[0]
-              if (!value) return
+              const value = values[0] as PrinterId | undefined
+              if (!value || value === printer) return
               void navigate({
                 search: value === "receipt" ? { printer: "receipt" } : {},
                 replace: true,
@@ -63,23 +72,21 @@ function PrintPage() {
             The print service does not list it, so jobs cannot be sent.
           </AlertDescription>
         </Alert>
-      ) : current &&
-        (current.state === "offline" || current.state === "stopped") ? (
-        <Alert>
-          <CircleAlertIcon />
-          <AlertTitle>
-            The {PRINTER_LABELS[printer].toLowerCase()} printer is{" "}
-            {current.state === "offline" ? "offline" : "stopped"}
-          </AlertTitle>
-          <AlertDescription>
-            Jobs wait in the queue until it is back. Dry runs still work.
-          </AlertDescription>
-        </Alert>
       ) : null}
       {printer === "receipt" ? (
-        <ReceiptForm key="receipt" disabled={missing} />
+        <ReceiptForm
+          key={`receipt-${again ?? ""}`}
+          printer={current}
+          disabled={missing}
+          again={again}
+        />
       ) : (
-        <DocumentForm key="document" disabled={missing} />
+        <DocumentForm
+          key={`document-${again ?? ""}`}
+          printer={current}
+          disabled={missing}
+          again={again}
+        />
       )}
     </Page>
   )
